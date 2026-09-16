@@ -65,6 +65,33 @@ function cfg = aglas_config(preset)
     cfg.flutter.k_tol    = 1e-8;      % reduced-frequency convergence
     cfg.flutter.max_iter = 80;
 
+    % --- Gust load alleviation control
+    % Trailing-edge control surface. The span limits are snapped to element
+    % boundaries by control_surface so the consistent load vector stays exact.
+    cfg.control.flap_chord_frac = 0.25;  % flap chord / wing chord      [-]
+    cfg.control.span_start_frac = 0.60;  % inboard edge, fraction of semi-span
+    cfg.control.span_end_frac   = 0.95;  % outboard edge
+    cfg.control.delta_max       = 20;    % deflection limit             [deg]
+    cfg.control.rate_max        = 150;   % rate limit                   [deg/s]
+    cfg.control.act_freq_hz     = 15;    % actuator natural frequency   [Hz]
+    cfg.control.act_zeta        = 0.70;  % actuator damping ratio       [-]
+
+    % Sensors used by the estimator.
+    cfg.sensor.strain_noise     = 2e-6;  % root strain noise, RMS       [-]
+    cfg.sensor.accel_noise      = 0.02;  % tip accelerometer noise, RMS [m/s^2]
+    % Process noise intensity on the gust state. This sets the estimator
+    % bandwidth: too high and the filter tries to differentiate its sensors,
+    % producing an observer far faster than the structure and impossible to
+    % integrate. 0.05 places the fastest observer pole near 150 Hz, about seven
+    % times the highest retained mode.
+    cfg.sensor.gust_psd         = 0.05;
+
+    % LQR cost weights. R is swept during tuning; these are the defaults the
+    % design scripts start from. See c4c for the trade study.
+    cfg.lqr.q_moment            = 1.0;   % weight on root bending moment
+    cfg.lqr.q_tip               = 0.0;   % weight on tip deflection
+    cfg.lqr.r_command           = 1.0;   % weight on commanded deflection
+
     % --- Safety / optimisation thresholds
     cfg.safety.fos_critical = 1.5;  % below this: red
     cfg.safety.fos_target   = 2.5;  % aerospace acceptance level
