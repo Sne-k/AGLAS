@@ -1,0 +1,19 @@
+# Claude Code project context (local only)
+.claude/
+
+# MATLAB
+*.asv
+*.autosave
+*.m~
+slprj/
+codegen/
+
+# Generated analysis products. Regenerate with run_aglas.m.
+results/*.png
+results/*.fig
+results/*.pdf
+animation/*.gif
+
+# OS
+.DS_Store
+Thumbs.db
