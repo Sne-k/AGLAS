@@ -29,6 +29,21 @@ the actual problem. Retrieval now reads the `SimulationOutput` object first and
 falls back to the base workspace, and reports the missing signal by name if
 neither has it.
 
+## What gets written
+
+Both are written into the same project folders the rest of the pipeline uses,
+so the Simulink results sit alongside the open-loop analysis rather than only
+existing in the MATLAB workspace.
+
+| File | Written by | Contents |
+|---|---|---|
+| `data/control_design.mat` | `aglas_sim_setup` | the full design: plant, estimator, reference model, gains, weights |
+| `data/simulink_run.mat` | `compare_simulink` | logged Simulink signals, the `.m` reference run, the comparison metrics and the settings used |
+| `results/simulink_verification.png` | `compare_simulink` | the overlay of model against reference |
+
+Note `data/*.mat` is listed in the repository `.gitignore`, so these are local
+artefacts unless force-added.
+
 ## What the model contains
 
 | Block | Contents |
@@ -82,6 +97,24 @@ fault. There is no model error to adapt to there, so the adaptive term can only
 add activity. The honest reading of these numbers is in the top-level control
 documentation: on this aircraft, across a realistic 35 to 200 m/s envelope,
 fixed-gain LQG stays stable and adaptation does not earn its complexity.
+
+## Interpreting the comparison
+
+`compare_simulink` reports four numbers. The ones that matter are the peak
+differences and the waveform RMS. A large worst-pointwise difference alongside
+small peak differences is normal: it means the two traces agree on the load the
+structure is sized by, and differ slightly in timing during a lightly damped
+secondary oscillation.
+
+One difference between the two is structural and permanent. The `.m` simulation
+computes the control once per step and holds it across the four RK4 stages,
+which is what a digital controller sampling at 5 kHz actually does. Simulink
+integrates the controller as part of one continuous system, so its command
+varies within the step.
+
+If the peaks disagree, set `AGLAS.adapt_on = 0` and re-run. That removes both
+adaptive integrators. If plain LQG then agrees tightly, the problem is in the
+adaptive path, not in the plant or estimator wiring.
 
 ## Verification status
 
