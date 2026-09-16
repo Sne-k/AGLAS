@@ -216,11 +216,35 @@ This is a result, not a failure to tune. Reporting MRAC as beneficial here
 would require either choosing a flight condition outside the usable envelope or
 quietly weakening the LQG baseline it is compared against.
 
-**Open question, not yet answered.** Whether MRAC pays off under *sustained*
-von Karman turbulence, where the excitation is persistent and the parameters
-have tens of seconds to converge, is the obvious follow-up. A 40 s run at
-Lambda = 0.4 was started and killed before it finished. It remains untested and
-nothing should be claimed about it.
+### 5.3 Sustained turbulence: the open question, now answered
+
+The obvious objection to the discrete-gust result is that adaptation never had
+time to work. Under sustained von Karman turbulence the excitation is
+persistent and the parameters have tens of seconds to converge, which is the
+condition MRAC theory actually assumes. Thirty seconds at 2.10 m/s RMS, root
+bending moment RMS in kN m:
+
+| Lambda | Open loop | LQG | Best MRAC | MRAC benefit |
+|---|---|---|---|---|
+| 1.00 | 30.04 | 14.11 | 17.41 | -23.4 % |
+| 0.40 | 30.04 | 20.67 | 23.64 | -14.4 % |
+
+**MRAC is worse here too**, including under a 60 % control effectiveness loss,
+and the best adaptation rate is the smallest one tried in both cases. So the
+timescale argument in section 5.2 was not the whole story: giving adaptation
+fifteen times longer does not rescue it.
+
+The likelier explanation is that the adaptive law is driven by the error
+between the plant and a reference model that only sees the gust through the
+*estimated* gust state. Under broadband turbulence that error is dominated by
+disturbance the reference model cannot reproduce, not by model mismatch. The
+adaptation then chases disturbance-induced error, sigma-modification spends its
+effort pulling the parameters back, and the net result is extra control
+activity with no uncertainty being cancelled.
+
+For the record the LQG itself performs consistently across both disturbance
+types: 53 % RMS reduction under turbulence against 53 % peak reduction under
+the discrete gust.
 
 ---
 
@@ -298,13 +322,92 @@ trusting any model output.
 | Preliminary tuning | Done, section 4. Design point r = 0.3, 55.6 % load reduction. |
 | MRAC | Implemented and evaluated. Does not help on this aircraft; section 5. |
 | Simulink model | Built, untested here, awaiting a run. |
-| Reinforcement learning | Not started. |
+| Reinforcement learning | Done as direct policy search; section 11. |
 
-On reinforcement learning: the honest framing is that LQG is already the exact
-optimum for the linear quadratic problem, so a learned policy has nothing to
-win on the nominal plant. The one place a learned policy could genuinely beat
-it is the regime section 4 exposes, where saturation is active and the linear
-design is no longer optimal. That argues for direct policy search over a
-structured controller against the saturated closed loop, rather than deep
-reinforcement learning, and it should be presented as such rather than as
-reinforcement learning for its own sake.
+---
+
+## 11. Learned control: direct policy search
+
+### 11.1 Why there is anything to learn
+
+LQG is exactly optimal, so at first sight there is nothing to search for. It is
+optimal for a specific problem though, and that problem is not the one being
+solved:
+
+1. It minimises an **integral quadratic cost**. The structure is sized by the
+   **single largest** root bending moment in the event. Different objectives,
+   different optima.
+2. It is derived for a **linear** plant. The real loop has a deflection limit
+   and a slew limit, and LQR has no representation of either. Section 4 shows
+   how badly that bites.
+
+Deep reinforcement learning would be the wrong tool. The plant is known, low
+order, and linear apart from two saturations; learning a value function from
+scratch would spend orders of magnitude more evaluations rediscovering a
+controller the Riccati equation already gives in closed form. The useful move
+is to start from that controller and search only over what it cannot model.
+
+### 11.2 Method
+
+Four multiplicative scales on blocks of the LQG gain, starting at `[1 1 1 1]`,
+which is the LQG solution itself, so the search can never do worse than its
+starting point. Compass search: try plus and minus one step per coordinate,
+move to the best improvement, halve the step when none improves. Deterministic,
+derivative-free, no toolbox. Each evaluation is a full simulation of the
+saturated closed loop, scored on peak root bending moment.
+
+### 11.3 Results
+
+| r_command | LQG | Tuned | Improvement | LQG saturation | Scales |
+|---|---|---|---|---|---|
+| 0.3 | 68.36 | **58.63** | +14.2 % | 0 % | [1.8, 0, 0.95, 1] |
+| 0.03 | 64.27 | 59.16 | +8.0 % | 13.5 % | [0, 0.75, 0, 2.2] |
+| 0.01 | 64.00 | 59.16 | +7.6 % | 14.5 % | [0, 0.2, 0, 1.4] |
+
+Best is 58.63 kN m, a **59.6 %** reduction from the 145.2 kN m open-loop peak,
+against LQG's 52.9 %. Policy search beats LQG at every control weight tried, so
+the gain is not simply a matter of choosing a better `r`.
+
+The tuned solution at the design weight is structurally interesting: it scales
+modal position feedback **up** by 1.8 and turns modal rate feedback **off**
+entirely. That is not a fit to one waveform, it is a different control law.
+
+### 11.4 Does it generalise, or is it overfitted to one gust?
+
+Tuned on the 2.0 s design gust, then evaluated on disturbances it never saw:
+
+| Validation case | LQG | Tuned | Change |
+|---|---|---|---|
+| Gust duration 1.0 s | 70.16 | 60.72 | +13.4 % |
+| Gust duration 3.0 s | 68.03 | 58.77 | +13.6 % |
+| Gust duration 4.0 s | 67.91 | 58.92 | +13.2 % |
+| Gust amplitude 6 m/s | 41.02 | 34.50 | +15.9 % |
+| Turbulence, peak | 29.53 | 26.30 | +11.0 % |
+| Turbulence, RMS | 12.42 | 10.82 | +12.9 % |
+| 80 m/s, off design | 60.88 | 48.30 | +20.7 % |
+
+It generalises across disturbance shape, amplitude, disturbance *class* and
+flight condition. It even wins on RMS under turbulence, which is closer to the
+integral criterion LQG optimises than to the peak criterion the search used.
+
+### 11.5 The honest caveat
+
+The improvement is not free. At the design point:
+
+| | Peak moment | Peak deflection | RMS command | Position saturation |
+|---|---|---|---|---|
+| LQG | 68.36 kN m | 17.93 deg | 5.58 deg | 0 % |
+| Tuned | 58.63 kN m | 20.01 deg | 6.37 deg | 3.9 % |
+
+The tuned policy uses **14 % more control effort** and sits right on the
+20 degree deflection limit, where LQG left two degrees unused. Part of the gain
+is simply spending authority the LQG's `R` weight was holding back.
+
+That is still a real finding rather than an artefact. `R` is an indirect proxy:
+there is no way to tell an LQR "use all the authority available and no more",
+and section 4 shows that trying to force it there by lowering `R` makes things
+catastrophically worse, because the linear design has no idea the limit exists.
+Policy search optimises the real objective under the real constraint and finds
+the boundary directly. The cost is that the tuned design operates with no
+deflection margin, which is a trade a designer should make deliberately rather
+than inherit.
