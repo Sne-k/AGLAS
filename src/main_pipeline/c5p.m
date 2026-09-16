@@ -1,65 +1,79 @@
 % =========================================================================
-% SCRIPT 5: ANIMATE GUST RESPONSE
+% AGLAS STAGE 5 (main pipeline) : DEFLECTION ANIMATION
 % =========================================================================
-% Description:
-% Creates an animation of the wing's deflection over time based on the
-% results of the gust response simulation. The animation can optionally
-% be saved as a GIF file.
+% Animates the reconstructed deflected shape over the gust event and writes
+% an animated GIF to animation/.
+%
+% Inputs  : data/modal_response.mat
+% Outputs : animation/wing_gust_animation.gif
 % =========================================================================
 
-% --- Configuration
-SAVE_GIF = true; % Set to true to save animation, false to just display
-filename = 'wing_gust_animation.gif'; % Name for the GIF file
-frame_delay = 0.05; % Time between animation frames
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-% --- Load Data
-load('modal_response.mat'); % Loads q_sol, t_sol, n_modes
-load('structural_model.mat', 'V_deflection', 'x_span');
+SAVE_GIF    = true;
+MAX_FRAMES  = 80;      % cap the frame count so the GIF stays a sane size
+FRAME_DELAY = 0.06;    % seconds between GIF frames
 
-% --- Setup Figure
-fig = figure('Name', 'Wing Gust Response Animation', 'NumberTitle', 'off');
-ax = gca;
-ax.NextPlot = 'replaceChildren';
+load(fullfile(paths.data, 'modal_response.mat'), ...
+     'cfg', 't_sol', 'w_field', 'tw', 'wg', 't_grid');
 
-% Calculate dynamic plot limits
-V_modes_deflection = V_deflection(:, 1:n_modes);
-full_deflection = q_sol * V_modes_deflection';
-max_def = max(abs(full_deflection(:))) * 1.2; % 20% margin
-if max_def == 0, max_def = 1; end % Avoid zero limits if no deflection
+fprintf('=== AGLAS Stage 5: animation ===\n\n');
 
-% --- Animation Loop
-for i = 1:5:length(t_sol)
-    % Reconstruct the wing's deflected shape at the current time step
-    q_instantaneous = q_sol(i, :);
-    deflection = q_instantaneous * V_modes_deflection';
-    
-    % Plot the wing shape
-    plot(x_span, [0, deflection], 'b-', 'LineWidth', 2);
-    hold on;
-    plot(x_span, zeros(size(x_span)), 'k--'); % Show undeflected position
-    hold off;
-    
-    % Format plot
+x        = linspace(0, cfg.geom.L, size(w_field, 2));
+frame_step = max(1, ceil(numel(t_sol)/MAX_FRAMES));
+frames     = 1:frame_step:numel(t_sol);
+gif_file = fullfile(paths.animation, 'wing_gust_animation.gif');
+
+y_lim = max(abs(w_field(:))) * 1.25;
+if y_lim == 0 || ~isfinite(y_lim), y_lim = 1; end
+
+fig = figure('Name', 'Wing gust response', 'NumberTitle', 'off', ...
+             'Position', [100 100 720 430], 'Color', 'w');
+
+fprintf('Rendering %d frames ...\n', numel(frames));
+first = true;
+for idx = frames
+    clf(fig);
+
+    subplot(2,1,1);
+    plot(x, w_field(idx,:), '-', 'LineWidth', 2.4); hold on;
+    plot(x, zeros(size(x)), 'k--', 'LineWidth', 0.8);
     grid on;
-    ylim([-max_def, max_def]);
-    xlim([x_span(1), x_span(end)]);
-    xlabel('Spanwise Location (m)');
-    ylabel('Deflection (m)');
-    title(sprintf('Wing Deflection at Time: %.2f s', t_sol(i)));
-    
+    xlim([0 cfg.geom.L]); ylim([-y_lim y_lim]);
+    xlabel('spanwise station [m]'); ylabel('deflection [m]');
+    title(sprintf('t = %5.2f s     tip deflection = %+6.3f m', ...
+                  t_sol(idx), w_field(idx,end)));
+
+    subplot(2,1,2);
+    plot(t_grid, wg, 'LineWidth', 1.4); hold on;
+    plot(t_sol(idx), interp1(t_grid, wg, t_sol(idx)), 'o', ...
+         'MarkerSize', 8, 'LineWidth', 1.6);
+    grid on;
+    xlim([t_grid(1) t_grid(end)]);
+    xlabel('time [s]'); ylabel('gust velocity [m/s]');
+    title('Gust input');
+
     drawnow;
-    
-    % Capture frame for GIF
+
     if SAVE_GIF
         frame = getframe(fig);
-        im = frame2im(frame);
-        [imind,cm] = rgb2ind(im,256);
-        if i == 1
-            imwrite(imind,cm,filename,'gif', 'Loopcount',inf, 'DelayTime', frame_delay);
+        [ind, cmap] = rgb_to_indexed(frame2im(frame), 128);
+        if first
+            imwrite(ind, cmap, gif_file, 'gif', ...
+                    'LoopCount', Inf, 'DelayTime', FRAME_DELAY);
+            first = false;
         else
-            imwrite(imind,cm,filename,'gif','WriteMode','append', 'DelayTime', frame_delay);
+            imwrite(ind, cmap, gif_file, 'gif', ...
+                    'WriteMode', 'append', 'DelayTime', FRAME_DELAY);
         end
     else
-        pause(frame_delay);
+        pause(FRAME_DELAY);
     end
 end
+
+if SAVE_GIF
+    fprintf('Saved %s\n', gif_file);
+end
+

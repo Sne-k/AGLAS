@@ -1,71 +1,89 @@
 % =========================================================================
-% SCRIPT 2: BUILD STRUCTURAL MODEL
+% AGLAS STAGE 2 (main pipeline) : STRUCTURAL MODEL AND MODAL ANALYSIS
 % =========================================================================
-% Description:
-% Constructs a 2D Euler-Bernoulli beam finite element model of the wing.
-% It calculates the global mass (M) and stiffness (K) matrices, applies
-% fixed-root boundary conditions, and solves the eigenvalue problem to
-% find the natural frequencies and mode shapes.
+% Assembles the cantilever finite element model, solves the free-vibration
+% eigenproblem and validates the result against the closed-form
+% Euler-Bernoulli cantilever solution.
+%
+% Inputs  : data/wing_geom.mat
+% Outputs : data/structural_model.mat, results/mode_shapes.png
 % =========================================================================
 
-% --- Load Parameters
-load('wing_geom.mat');
-dx = L / N; % Length of one element
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-% --- Define Local Element Matrices
-% Local stiffness matrix for an Euler-Bernoulli beam element
-k_local = (E*I/dx^3) * [12, 6*dx, -12, 6*dx;
-                       6*dx, 4*dx^2, -6*dx, 2*dx^2;
-                       -12, -6*dx, 12, -6*dx;
-                       6*dx, 2*dx^2, -6*dx, 4*dx^2];
+load(fullfile(paths.data, 'wing_geom.mat'), 'cfg');
 
-% Consistent local mass matrix for an Euler-Bernoulli beam element
-m_local = (rho*A*dx/420) * [156, 22*dx, 54, -13*dx;
-                           22*dx, 4*dx^2, 13*dx, -3*dx^2;
-                           54, 13*dx, 156, -22*dx;
-                           -13*dx, -3*dx^2, -22*dx, 4*dx^2];
+fprintf('=== AGLAS Stage 2: structural model ===\n\n');
 
-% --- Assemble Global Matrices
-n_nodes = N + 1;
-K_global = zeros(2 * n_nodes);
-M_global = zeros(2 * n_nodes);
+fem   = beam_fem(cfg);
+modes = modal_analysis(fem, min(12, fem.n_dof));
 
-for i = 1:N
-    dof_indices = (2*i-1):(2*i+2); % DOFs for element i
-    K_global(dof_indices, dof_indices) = K_global(dof_indices, dof_indices) + k_local;
-    M_global(dof_indices, dof_indices) = M_global(dof_indices, dof_indices) + m_local;
+fprintf('Model: %d elements, %d DOF per node, %d free DOF\n', ...
+        fem.n_el, fem.dpn, fem.n_dof);
+
+% --- Sanity checks that the original code never performed --------------
+tol = 1e-9;
+assert(norm(fem.K - fem.K.', 'fro') < tol*norm(fem.K, 'fro'), 'K is not symmetric');
+assert(norm(fem.M - fem.M.', 'fro') < tol*norm(fem.M, 'fro'), 'M is not symmetric');
+assert(all(eig(fem.K) > 0), 'K is not positive definite');
+assert(all(eig(fem.M) > 0), 'M is not positive definite');
+
+mass_fem = sum(sum(fem.M_full(1:fem.dpn:end, 1:fem.dpn:end)));
+mass_exact = cfg.section.m_total * cfg.geom.L;
+fprintf('Mass check: assembled %.6f kg vs exact %.6f kg (error %.2e)\n', ...
+        mass_fem, mass_exact, abs(mass_fem-mass_exact)/mass_exact);
+
+orth_M = norm(modes.Phi.'*fem.M*modes.Phi - eye(modes.n_modes), 'fro');
+fprintf('Mass-orthonormality  ||Phi''*M*Phi - I|| = %.3e\n', orth_M);
+
+% --- Validation against the analytical cantilever ----------------------
+beta_n = [1.875104068, 4.694091133, 7.854757438, 10.99554073, 14.13716839];
+f_exact = beta_n.^2 / (2*pi) * ...
+          sqrt(cfg.section.EI / (cfg.section.m_total * cfg.geom.L^4));
+bend_idx = find(strcmp(modes.type, 'bending'));
+n_cmp = min(numel(bend_idx), numel(f_exact));
+
+fprintf('\nBending frequencies vs closed-form Euler-Bernoulli cantilever\n');
+fprintf('  %-6s %12s %12s %10s\n', 'mode', 'FEM [Hz]', 'exact [Hz]', 'error [%]');
+max_err = 0;
+for i = 1:n_cmp
+    f_fem = modes.freq_hz(bend_idx(i));
+    err = 100*abs(f_fem - f_exact(i))/f_exact(i);
+    max_err = max(max_err, err);
+    fprintf('  %-6d %12.4f %12.4f %10.4f\n', i, f_fem, f_exact(i), err);
+end
+if max_err > 1.0
+    warning('AGLAS:femAccuracy', ...
+        'Bending frequency error %.2f %% exceeds 1 %%. Refine cfg.fem.n_elements.', max_err);
 end
 
-% --- Apply Boundary Conditions (Fixed Root at x=0)
-% The first two DOFs (deflection and rotation at node 1) are fixed.
-dofs_to_keep = 3:(2 * n_nodes);
-K = K_global(dofs_to_keep, dofs_to_keep);
-M = M_global(dofs_to_keep, dofs_to_keep);
-
-% --- Solve Eigenvalue Problem: K*v = omega^2*M*v
-[V_eigenvectors, D] = eig(K, M);
-omega = sqrt(diag(D));
-freqs_hz = omega / (2 * pi);
-
-% --- Normalize and Extract Mode Shapes
-% Normalize eigenvectors for consistent scaling
-for i = 1:size(V_eigenvectors, 2)
-    V_eigenvectors(:,i) = V_eigenvectors(:,i) / max(abs(V_eigenvectors(:,i)));
+fprintf('\nAll modes\n');
+for i = 1:min(8, modes.n_modes)
+    fprintf('  mode %2d : %9.3f Hz   %s\n', i, modes.freq_hz(i), modes.type{i});
 end
-% Extract translational components for plotting and reconstruction
-V_deflection = V_eigenvectors(1:2:end, :);
 
-% --- Plot First 3 Mode Shapes
-figure('Name', 'Wing Mode Shapes', 'NumberTitle', 'off');
-x_span = linspace(0, L, n_nodes);
-for i = 1:3
-    subplot(3, 1, i);
-    plot(x_span, [0; V_deflection(:,i)], 'o-', 'LineWidth', 1.5, 'MarkerSize', 5);
-    title(sprintf('Mode %d Shape (%.2f Hz)', i, freqs_hz(i)));
-    ylabel('Norm. Deflection');
+% --- Plot mode shapes ---------------------------------------------------
+n_plot = min(4, modes.n_modes);
+fig = figure('Name', 'Wing mode shapes', 'NumberTitle', 'off', ...
+             'Position', [100 100 760 820]);
+for i = 1:n_plot
+    subplot(n_plot, 1, i);
+    plot(fem.x_nodes, modes.w_shape(:,i), '-o', 'LineWidth', 1.6, 'MarkerSize', 4);
+    if fem.torsion
+        hold on;
+        plot(fem.x_nodes, modes.ph_shape(:,i), '--s', 'LineWidth', 1.3, 'MarkerSize', 4);
+        legend('bending w', 'twist \phi', 'Location', 'northwest');
+    end
     grid on;
-    if i == 3, xlabel('Spanwise Location (m)'); end
+    ylabel('mode shape');
+    title(sprintf('Mode %d  -  %.3f Hz  (%s)', i, modes.freq_hz(i), modes.type{i}));
+    if i == n_plot, xlabel('spanwise station [m]'); end
 end
+print(fig, fullfile(paths.results, 'mode_shapes.png'), '-dpng', '-r150');
 
-% --- Save Model Data
-save('structural_model.mat', 'M', 'K', 'V_eigenvectors', 'V_deflection', 'freqs_hz', 'x_span');
+out_file = fullfile(paths.data, 'structural_model.mat');
+save(out_file, 'cfg', 'fem', 'modes');
+fprintf('\nSaved %s\n', out_file);
+fprintf('Saved %s\n', fullfile(paths.results, 'mode_shapes.png'));

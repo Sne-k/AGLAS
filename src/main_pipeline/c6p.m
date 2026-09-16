@@ -1,83 +1,109 @@
 % =========================================================================
-% SCRIPT 6: STRESS ANALYSIS
+% AGLAS STAGE 6 (main pipeline) : STRESS, STRAIN AND FACTOR OF SAFETY
 % =========================================================================
-% Description:
-% Calculates the bending stress in the wing resulting from the gust load.
-% It uses the modal stress recovery method, where stress is related to the
-% second spatial derivative of the mode shapes (curvature). It finds the
-% maximum stress at the wing root and calculates the Factor of Safety (FOS).
+% Recovers the bending moment, outer-fibre stress and strain fields over the
+% whole span and the whole gust event, then evaluates the factor of safety.
+%
+% Curvature comes from the exact second derivative of the cubic Hermite
+% element interpolation, using both the translation and the rotation degrees
+% of freedom. See recover_bending for why the original central-difference
+% approach missed the root, where a cantilever carries its largest moment,
+% and so reported a factor of safety 17 % higher than the true value.
+%
+% Inputs  : data/modal_response.mat, data/structural_model.mat
+% Outputs : data/fos_data.mat, results/stress_analysis.png
 % =========================================================================
 
-% --- Load Data
-load('wing_geom.mat', 'E', 'I', 'h', 'yield_strength');
-load('structural_model.mat', 'V_deflection', 'x_span');
-load('modal_response.mat', 'q_sol', 't_sol', 'n_modes');
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-% --- Modal Stress Recovery Method
-% Bending Stress (sigma) = M*y/I, where M = E*I*(d^2(deflection)/dx^2)
-% We first find the "modal curvature" (d^2(phi)/dx^2) for each mode shape phi.
-d2V_dx2 = zeros(size(V_deflection, 1), n_modes);
-V_modes_deflection_full = [zeros(1, n_modes); V_deflection(:, 1:n_modes)]; % Add fixed root
+load(fullfile(paths.data, 'structural_model.mat'), 'fem');
+load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof');
 
-for mode = 1:n_modes
-    % Use central finite differences to find the second derivative
-    V = V_modes_deflection_full(:, mode);
-    for node = 2:length(x_span)-1
-        d2V_dx2(node-1, mode) = (V(node+1) - 2*V(node) + V(node-1)) / (x_span(2)-x_span(1))^2;
-    end
+fprintf('=== AGLAS Stage 6: stress and factor of safety ===\n\n');
+
+rec = recover_bending(cfg, fem, U_dof.');     % [n_nodes x n_time]
+
+x          = rec.x(:);
+stress     = rec.stress;
+strain     = rec.strain;
+moment     = rec.moment;
+sigma_y    = cfg.material.sigma_yield;
+
+FoS_field  = sigma_y ./ max(abs(stress), eps);
+
+[max_stress, lin_idx]       = max(abs(stress(:)));
+[i_node_max, i_time_max]    = ind2sub(size(stress), lin_idx);
+min_FoS                     = sigma_y / max_stress;
+
+root_stress_t               = stress(1, :);
+[peak_root_stress, i_root_t]= max(abs(root_stress_t));
+FoS_root                    = sigma_y / peak_root_stress;
+
+fprintf('Peak bending moment    : %10.1f N.m  at x = %.2f m\n', ...
+        max(abs(moment(:))), x(i_node_max));
+fprintf('Peak stress            : %10.2f MPa at x = %.2f m, t = %.3f s\n', ...
+        max_stress/1e6, x(i_node_max), t_sol(i_time_max));
+fprintf('Peak strain            : %10.2f microstrain\n', max(abs(strain(:)))*1e6);
+fprintf('Peak stress at the root: %10.2f MPa at t = %.3f s\n', ...
+        peak_root_stress/1e6, t_sol(i_root_t));
+fprintf('Yield strength         : %10.2f MPa (%s)\n', sigma_y/1e6, cfg.material.name);
+fprintf('\nMinimum factor of safety : %.3f  (at x = %.2f m)\n', min_FoS, x(i_node_max));
+fprintf('Factor of safety at root : %.3f\n', FoS_root);
+
+fprintf('\nAcceptance\n');
+if min_FoS < cfg.safety.fos_critical
+    fprintf('  FAIL  : below the critical threshold of %.1f\n', cfg.safety.fos_critical);
+elseif min_FoS < cfg.safety.fos_target
+    fprintf('  MARGINAL : above the critical %.1f but below the target %.1f\n', ...
+            cfg.safety.fos_critical, cfg.safety.fos_target);
+else
+    fprintf('  PASS  : at or above the target of %.1f\n', cfg.safety.fos_target);
 end
 
-% Modal Bending Moment: M_modal = E*I * (modal curvature)
-M_modal = E * I * d2V_dx2;
+fprintf('\nMesh quality: peak inter-element curvature jump %.3e 1/m\n', ...
+        max(abs(rec.jump(:))));
 
-% Reconstruct time history of bending moment at each node
-% M(x,t) = sum over modes [ q(t) * M_modal(x) ]
-M_t = q_sol * M_modal'; % Result is a [time x nodes] matrix
+% ---------------------------------------------------------------- plots --
+fig = figure('Name', 'Stress and factor of safety', 'NumberTitle', 'off', ...
+             'Position', [100 100 1000 780]);
 
-% --- Calculate Bending Stress
-% sigma = M*c/I, where c is the distance from the neutral axis (h/2)
-c = h / 2;
-stress_t = (M_t * c) / I;
+subplot(2,2,1);
+plot(t_sol, root_stress_t/1e6, 'LineWidth', 1.6); hold on;
+plot(t_sol(i_root_t), root_stress_t(i_root_t)/1e6, 'o', 'MarkerSize', 7, 'LineWidth', 1.4);
+grid on; xlabel('time [s]'); ylabel('stress [MPa]');
+title(sprintf('Root stress history (peak %.1f MPa)', peak_root_stress/1e6));
 
-% --- Analyze Stress at the Wing Root (Node 2, index 1 in our matrices)
-stress_root_t = stress_t(:, 1);
-[max_stress_root, time_idx] = max(abs(stress_root_t));
-time_of_max_stress = t_sol(time_idx);
-stress_dist_at_max = stress_t(time_idx, :);
+subplot(2,2,2);
+plot(x, stress(:, i_time_max)/1e6, 'LineWidth', 1.8); hold on;
+plot(x([1 end]), [ sigma_y  sigma_y]/1e6, 'k--', 'LineWidth', 1.0);
+plot(x([1 end]), [-sigma_y -sigma_y]/1e6, 'k--', 'LineWidth', 1.0);
+grid on; xlabel('spanwise station [m]'); ylabel('stress [MPa]');
+title(sprintf('Spanwise stress at peak, t = %.2f s', t_sol(i_time_max)));
+legend('stress', 'yield', 'Location', 'northeast');
 
-% --- Calculate Factor of Safety (FOS)
-FOS = yield_strength / max_stress_root;
+subplot(2,2,3);
+imagesc(t_sol, x, min(FoS_field, cfg.safety.fos_plot_cap));
+set(gca, 'YDir', 'normal');
+colorbar; xlabel('time [s]'); ylabel('spanwise station [m]');
+title(sprintf('Factor of safety field (clipped at %g)', cfg.safety.fos_plot_cap));
 
-% --- Plot Results
-figure('Name', 'Stress Analysis Results', 'NumberTitle', 'off');
+subplot(2,2,4);
+plot(x, min(FoS_field, [], 2), 'LineWidth', 1.8); hold on;
+plot(x([1 end]), cfg.safety.fos_target*[1 1],   'k--', 'LineWidth', 1.0);
+plot(x([1 end]), cfg.safety.fos_critical*[1 1], 'k:',  'LineWidth', 1.2);
+grid on; xlabel('spanwise station [m]'); ylabel('minimum factor of safety');
+title('Minimum factor of safety along the span');
+legend('minimum FoS', sprintf('target %.1f', cfg.safety.fos_target), ...
+       sprintf('critical %.1f', cfg.safety.fos_critical), 'Location', 'northwest');
+ylim([0, min(cfg.safety.fos_plot_cap, max(min(FoS_field, [], 2))*1.2)]);
 
-% Plot 1: Stress at Wing Root vs. Time
-subplot(2,1,1);
-plot(t_sol, stress_root_t / 1e6, 'b', 'LineWidth', 1.5);
-hold on;
-plot(time_of_max_stress, max_stress_root / 1e6, 'ro', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-title('Bending Stress at Wing Root');
-xlabel('Time (s)');
-ylabel('Stress (MPa)');
-legend(sprintf('Max Stress: %.2f MPa', max_stress_root / 1e6), 'Location', 'southeast');
-grid on;
+print(fig, fullfile(paths.results, 'stress_analysis.png'), '-dpng', '-r150');
 
-% Plot 2: Stress Distribution along Span at Time of Max Stress
-subplot(2,1,2);
-plot(x_span(2:end), stress_dist_at_max / 1e6, 'r', 'LineWidth', 1.5);
-title(sprintf('Stress Distribution at t = %.2f s (Time of Peak Stress)', time_of_max_stress));
-xlabel('Spanwise Location (m)');
-ylabel('Stress (MPa)');
-grid on;
-
-% --- Display Final Results in Command Window
-fprintf('--- Stress Analysis Summary ---\n');
-fprintf('Max Bending Stress at Root: %.2f MPa\n', max_stress_root / 1e6);
-fprintf('Yield Strength of Material: %.0f MPa\n', yield_strength / 1e6);
-fprintf('Factor of Safety (FOS): %.2f\n', FOS);
-if FOS < 1.5
-    fprintf('WARNING: Factor of Safety is below the typical minimum of 1.5.\n');
-end
-
-% --- Save Results
-save('fos_data.mat', 'max_stress_root', 'FOS', 'yield_strength');
+out_file = fullfile(paths.data, 'fos_data.mat');
+save(out_file, 'cfg', 'x', 't_sol', 'stress', 'strain', 'moment', ...
+     'FoS_field', 'min_FoS', 'FoS_root', 'max_stress', 'peak_root_stress', ...
+     'sigma_y');
+fprintf('\nSaved %s\n', out_file);
+fprintf('Saved %s\n', fullfile(paths.results, 'stress_analysis.png'));
