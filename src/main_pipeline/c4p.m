@@ -67,6 +67,13 @@ else
     fprintf('Divergence   : %8.2f m/s\n', res.divergence_speed);
 end
 
+fprintf(['\nBranch labels are assigned by matching eigenvector shape and\n' ...
+         'eigenvalue continuity between speeds. Where two branches coalesce,\n' ...
+         'which is what produces classical bending-torsion flutter, their\n' ...
+         'identities genuinely merge and the labels may exchange beyond that\n' ...
+         'point. The flutter speed above does not depend on the labelling: it\n' ...
+         'is taken from the largest real part over all roots at each speed.\n']);
+
 U_crit = min([res.flutter_speed, res.divergence_speed]);
 if isfinite(U_crit)
     fprintf('Critical speed: %.2f m/s, Mach %.3f at ISA sea level\n', ...
@@ -88,18 +95,22 @@ fig = figure('Name', 'Flutter V-g-f diagram', 'NumberTitle', 'off', ...
              'Position', [100 100 880 760]);
 
 subplot(2,1,1);
-plot(res.U, res.freq_hz, 'LineWidth', 1.5);
+h_f = plot(res.U, res.freq_hz, 'LineWidth', 1.5);
 grid on; ylabel('frequency [Hz]');
 title('V-f diagram: aeroelastic frequency vs airspeed');
-lg = cell(1, size(res.freq_hz,2));
-for i = 1:numel(lg), lg{i} = sprintf('branch %d', i); end
-legend(lg, 'Location', 'northwest');
 hold on;
 if isfinite(res.flutter_speed)
     yl = ylim;
     plot([res.flutter_speed res.flutter_speed], yl, 'r--', 'LineWidth', 1.5);
     ylim(yl);
 end
+% Pass the branch handles explicitly so the flutter marker stays out of the
+% legend. Excluding it via the Annotation property is MATLAB-only.
+lg = cell(1, numel(h_f));
+for i = 1:numel(lg)
+    lg{i} = sprintf('branch %d (%.1f Hz)', i, res.freq_hz(1,i));
+end
+legend(h_f, lg, 'Location', 'northwest');
 
 subplot(2,1,2);
 plot(res.U, res.g, 'LineWidth', 1.5); hold on;

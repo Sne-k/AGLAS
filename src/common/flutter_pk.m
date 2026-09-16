@@ -60,6 +60,8 @@ function res = flutter_pk(cfg, fem, modes)
     k_all    = nan(nU, 2*nm);
     conv_all = false(nU, 2*nm);
     vec_prev = [];
+    p_prev   = [];
+    p_prev2  = [];
 
     % Initial reduced-frequency guesses from the in-vacuo frequencies.
     k_guess = [modes.omega.' * b / U_sweep(1), modes.omega.' * b / U_sweep(1)];
@@ -103,16 +105,27 @@ function res = flutter_pk(cfg, fem, modes)
             conv_here(m) = ok;
         end
 
-        % --- track branches against the previous speed by eigenvector match
+        % --- track branches against the previous speed
         if isempty(vec_prev)
             order = 1:2*nm;
         else
-            order = match_modes(vec_prev, vec_here);
+            % Predict where each branch should land by linear extrapolation of
+            % its eigenvalue, then match on eigenvector shape and eigenvalue
+            % proximity together. Shape alone is ambiguous where two branches
+            % coalesce, which is exactly where flutter happens.
+            if isempty(p_prev2)
+                p_pred = p_prev;
+            else
+                p_pred = p_prev + (p_prev - p_prev2);
+            end
+            order = match_modes(vec_prev, vec_here, p_pred, p_here);
         end
 
         p_all(iu,:)    = p_here(order);
         k_all(iu,:)    = k_here(order);
         conv_all(iu,:) = conv_here(order);
+        p_prev2        = p_prev;
+        p_prev         = p_here(order);
         vec_prev       = vec_here(:, order);
         k_guess        = k_all(iu,:);
         k_guess(~isfinite(k_guess) | k_guess <= 0) = 1e-3;
@@ -140,23 +153,26 @@ function res = flutter_pk(cfg, fem, modes)
     res.g        = 2*real(res.p) ./ max(abs(imag(res.p)), eps);
 
     % ------------------------------------------------- flutter crossing
+    % Detected from the largest real part over all roots at each speed, which
+    % needs no branch labelling at all. Flutter is a property of the spectrum,
+    % so tying its detection to mode tracking would make the answer depend on
+    % how well the tracker copes with a coalescence, which is precisely where
+    % tracking is hardest and where the crossing occurs.
     res.flutter_speed   = NaN;
     res.flutter_freq_hz = NaN;
     res.flutter_mode    = NaN;
-    for j = 1:size(res.damping, 2)
-        d = res.damping(:, j);
-        for i = 1:nU-1
-            if isfinite(d(i)) && isfinite(d(i+1)) && d(i) < 0 && d(i+1) >= 0
-                w = -d(i) / (d(i+1) - d(i));
-                Uf = U_sweep(i) + w*(U_sweep(i+1) - U_sweep(i));
-                if isnan(res.flutter_speed) || Uf < res.flutter_speed
-                    res.flutter_speed   = Uf;
-                    res.flutter_freq_hz = res.freq_hz(i,j) + ...
-                        w*(res.freq_hz(i+1,j) - res.freq_hz(i,j));
-                    res.flutter_mode    = j;
-                end
-                break;
-            end
+
+    max_re = max(res.damping, [], 2);
+    for i = 1:nU-1
+        if isfinite(max_re(i)) && isfinite(max_re(i+1)) && ...
+           max_re(i) < 0 && max_re(i+1) >= 0
+            w  = -max_re(i) / (max_re(i+1) - max_re(i));
+            res.flutter_speed = U_sweep(i) + w*(U_sweep(i+1) - U_sweep(i));
+            [~, j] = max(res.damping(i+1, :));
+            res.flutter_mode    = j;
+            res.flutter_freq_hz = res.freq_hz(i,j) + ...
+                w*(res.freq_hz(i+1,j) - res.freq_hz(i,j));
+            break;
         end
     end
 
@@ -192,30 +208,60 @@ function res = flutter_pk(cfg, fem, modes)
 end
 
 % ------------------------------------------------------------------------
-function order = match_modes(V_prev, V_now)
-%MATCH_MODES  Greedy assignment of current eigenvectors to previous branches.
+function order = match_modes(V_prev, V_now, p_pred, p_now)
+%MATCH_MODES  Assign current roots to previous branches.
+%
+%   Combines two similarity measures. The modal assurance criterion compares
+%   eigenvector shape, which is reliable while branches are well separated.
+%   Eigenvalue proximity to a linear extrapolation of each branch compares
+%   position in the complex plane, which stays informative through a
+%   coalescence where two shapes become nearly identical. Using only the first
+%   makes branches swap labels at the flutter crossing.
+
     n = size(V_prev, 2);
-    Cmat = zeros(n);
+    if nargin < 4
+        p_pred = zeros(1, n);
+        p_now  = zeros(1, n);
+        use_p  = false;
+    else
+        use_p = true;
+    end
+
+    pscale = max(abs([p_pred(:); p_now(:)]));
+    if ~isfinite(pscale) || pscale <= 0
+        pscale = 1;
+    end
+
+    S = zeros(n);
     for a = 1:n
-        for bb = 1:n
-            va = V_prev(:,a); vb = V_now(:,bb);
-            na = norm(va); nb = norm(vb);
+        va = V_prev(:,a);
+        na = norm(va);
+        for b = 1:n
+            vb = V_now(:,b);
+            nb = norm(vb);
             if na == 0 || nb == 0
-                Cmat(a,bb) = 0;
+                mac = 0;
             else
-                Cmat(a,bb) = abs(va' * vb) / (na*nb);   % modal assurance
+                mac = abs(va' * vb) / (na*nb);
             end
+            if use_p && isfinite(p_pred(a)) && isfinite(p_now(b))
+                prox = 1 / (1 + abs(p_now(b) - p_pred(a))/pscale);
+            else
+                prox = 1;
+            end
+            S(a,b) = mac * prox;
         end
     end
+
     order = zeros(1, n);
     used  = false(1, n);
     for step = 1:n
-        [~, idx] = max(Cmat(:));
-        [a, bb]  = ind2sub(size(Cmat), idx);
-        order(a) = bb;
-        used(bb) = true;
-        Cmat(a,:)  = -Inf;
-        Cmat(:,bb) = -Inf;
+        [~, idx] = max(S(:));
+        [a, b]   = ind2sub(size(S), idx);
+        order(a) = b;
+        used(b)  = true;
+        S(a,:) = -Inf;
+        S(:,b) = -Inf;
     end
     miss = find(order == 0);
     free = find(~used);
