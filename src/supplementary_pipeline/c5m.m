@@ -1,163 +1,113 @@
-%% STRAIN ANALYSIS AND SAFETY VALIDATION MODULE (c5m.m)
-% Computes displacement, curvature, stress, and strain from modal data.
-% Performs a comprehensive Factor of Safety (FoS) analysis.
+% =========================================================================
+% AGLAS SUPPLEMENTARY STAGE 5 : STRAIN AND SAFETY VALIDATION
+% =========================================================================
+% Converts the recovered stress field into strain, evaluates the factor of
+% safety over span and time, and reports where and when the structure is
+% most highly loaded.
 %
-% This version is robust to mismatches in mode counts between input files.
+% Corrections relative to the original version of this script:
+%   - The spanwise grid was built as linspace(0, L, N) with N the number of
+%     ELEMENTS, while the mode shape array held one row per NODE excluding
+%     the clamped root. The grid spacing was therefore wrong by L/N against
+%     L/(N+1), and the first row of the mode shapes, which sits one element
+%     outboard of the root, was placed at x = 0. Curvature goes as 1/dx^2,
+%     so an 11 % error in dx became a 23 % error in every stress and every
+%     factor of safety the script reported.
+%   - The header promised strain_analysis_results.mat, which was never
+%     written.
+%   - caxis was renamed clim in R2022a and WindowState 'maximized' fails in
+%     headless sessions; neither is used now.
 %
-% Dependencies:
-%   - modal_response.mat (from c3m.m)
-%   - modal_shapes.mat (from c2m.m)
-%
-% Generates:
-%   - strain_analysis_results.mat: A struct with all calculated data.
-%   - A series of plots for visualization.
-%
-% Last Revised: July 17, 2024
-clc; clear; close all;
+% Inputs  : data/stress_field.mat
+% Outputs : data/strain_analysis.mat, results/strain_safety.png
+% =========================================================================
 
-%% 1. Configuration and Constants
-fprintf('=== Wing Strain Analysis & Safety Validation ===\n');
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-% Centralized configuration for analysis
-config.material.E = 70e9;              % Young's modulus [Pa] (Aluminum)
-config.material.nu = 0.33;             % Poisson's ratio
-config.material.sigma_yield = 345e6;   % Yield strength [Pa] (Al 2024-T3)
+load(fullfile(paths.data, 'stress_field.mat'), 'cfg', 'x', 't_sol', 'stress');
 
-% **FIX**: Define geometry directly, as it's not in the .mat file
-config.geometry.b = 0.15;              % Wing section width [m]
-config.geometry.h = 0.02;              % Wing section height [m]
+fprintf('=== AGLAS supplementary stage 5: strain and safety ===\n\n');
 
-config.analysis.safety_factor_req = 2.5; % Minimum required safety factor
+E       = cfg.material.E;
+sigma_y = cfg.material.sigma_yield;
 
-%% 2. Load Input Data from Previous Modules
-fprintf('Loading modal data...\n');
-if ~exist('modal_response.mat', 'file') || ~exist('modal_shapes.mat', 'file')
-    error('Required data files not found. Please run c2m.m and c3m.m first.');
-end
+strain     = stress / E;
+FoS_field  = sigma_y ./ max(abs(stress), eps);
+FoS_span   = min(FoS_field, [], 2);           % worst case in time, per station
 
-try
-    % Load modal response data (from c3m.m)
-    modal_data = load('modal_response.mat', 'q_sol', 't_sol');
-    q_raw = modal_data.q_sol;
-    t = modal_data.t_sol;
-    
-    % Load modal shapes and geometry (from c2m.m)
-    shape_data = load('modal_shapes.mat', 'V', 'freqs', 'N', 'L');
-    Phi_raw = shape_data.V;         % Mode shapes (N_nodes x n_modes)
-    x = linspace(0, shape_data.L, shape_data.N);
-    
-catch ME
-    error('Failed to load or process data: %s', ME.message);
-end
+[max_strain, k]        = max(abs(strain(:)));
+[i_node, i_time]       = ind2sub(size(strain), k);
+[min_FoS, kf]          = min(FoS_field(:));
+[jf_node, jf_time]     = ind2sub(size(FoS_field), kf);
 
-%% 3. Data Preprocessing and Synchronization
-% **FIX**: Resolve mode count mismatch between input files.
-n_modes_in_response = size(q_raw, 2);
-n_modes_in_shapes = size(Phi_raw, 2);
+fprintf('Peak strain          : %9.1f microstrain at x = %.2f m, t = %.3f s\n', ...
+        max_strain*1e6, x(i_node), t_sol(i_time));
+fprintf('Peak stress          : %9.2f MPa\n', max(abs(stress(:)))/1e6);
+fprintf('Yield strain         : %9.1f microstrain\n', sigma_y/E*1e6);
+fprintf('Minimum FoS          : %9.3f at x = %.2f m, t = %.3f s\n', ...
+        min_FoS, x(jf_node), t_sol(jf_time));
 
-% Use the minimum number of modes available from both sources.
-n_modes_to_use = min(n_modes_in_response, n_modes_in_shapes);
+fprintf('\nSafety zones (thresholds %.1f critical / %.1f target)\n', ...
+        cfg.safety.fos_critical, cfg.safety.fos_target);
+n_tot  = numel(FoS_field);
+n_crit = sum(FoS_field(:) <  cfg.safety.fos_critical);
+n_caut = sum(FoS_field(:) >= cfg.safety.fos_critical & FoS_field(:) < cfg.safety.fos_target);
+n_safe = sum(FoS_field(:) >= cfg.safety.fos_target);
+fprintf('  critical  (FoS < %.1f)      : %7.3f %% of the span-time field\n', ...
+        cfg.safety.fos_critical, 100*n_crit/n_tot);
+fprintf('  caution   (%.1f to %.1f)     : %7.3f %%\n', ...
+        cfg.safety.fos_critical, cfg.safety.fos_target, 100*n_caut/n_tot);
+fprintf('  safe      (FoS >= %.1f)     : %7.3f %%\n', ...
+        cfg.safety.fos_target, 100*n_safe/n_tot);
 
-fprintf('Data loaded. Found %d modes in response data and %d in shape data.\n', ...
-        n_modes_in_response, n_modes_in_shapes);
-fprintf('--> Synchronizing to use %d modes for analysis.\n', n_modes_to_use);
-
-% Trim data to the synchronized mode count
-q = q_raw(:, 1:n_modes_to_use);       % (n_time x n_modes_to_use)
-Phi = Phi_raw(:, 1:n_modes_to_use);   % (N_nodes x n_modes_to_use)
-
-%% 4. Calculate Dynamic and Structural Response
-% Geometric property for stress calculation
-I = (config.geometry.b * config.geometry.h^3) / 12; % Moment of inertia
-z_outer = config.geometry.h / 2;               % Max distance from neutral axis
-
-% Reconstruct full displacement field w(x,t)
-w = Phi * q'; % Displacement field (N_nodes x n_time)
-w(~isfinite(w)) = 0; % Sanity check
-
-% Calculate curvature (d^2w/dx^2) using a 2nd-order finite difference
-dx = x(2) - x(1);
-curvature = zeros(size(w));
-% Central difference for interior points
-curvature(2:end-1, :) = (w(3:end, :) - 2*w(2:end-1, :) + w(1:end-2, :)) / dx^2;
-% Forward difference for the fixed root (x=0)
-curvature(1, :) = (w(3, :) - 2*w(2, :) + w(1, :)) / dx^2;
-% Curvature is zero at the free tip (x=L)
-curvature(end, :) = 0;
-
-% Calculate Stress and Strain
-stress_matrix = -config.material.E * z_outer * curvature;
-stress_matrix(~isfinite(stress_matrix)) = 0;
-strain_matrix = stress_matrix / config.material.E;
-
-%% 5. Safety and Performance Analysis
-safety_factor_stress = config.material.sigma_yield ./ (abs(stress_matrix) + eps);
-[max_stress, max_stress_idx] = max(abs(stress_matrix(:)));
-[min_sf, min_sf_idx] = min(safety_factor_stress(:));
-[max_stress_x_idx, max_stress_t_idx] = ind2sub(size(stress_matrix), max_stress_idx);
-[min_sf_x_idx, min_sf_t_idx] = ind2sub(size(safety_factor_stress), min_sf_idx);
-
-%% 6. Visualization
-fprintf('Generating analysis plots...\n');
-[T_mesh, X_mesh] = meshgrid(t, x);
-
-% Create a new figure window for all subplots
-figure('Name', 'Comprehensive Strain & Safety Analysis', 'NumberTitle', 'off', 'WindowState', 'maximized');
-
-% Plot 1: Spanwise Stress Distribution at Peak Time
-subplot(2,2,1);
-[~, peak_time_idx] = max(max(abs(stress_matrix), [], 1));
-peak_time = t(peak_time_idx);
-plot(x, stress_matrix(:, peak_time_idx)/1e6, 'b', 'LineWidth', 2);
-hold on;
-yline(config.material.sigma_yield/1e6, 'k--', 'Yield Strength');
-yline(-config.material.sigma_yield/1e6, 'k--');
-xlabel('Spanwise Location [m]'); ylabel('Stress [MPa]');
-title(sprintf('Stress Distribution at Peak Response (t=%.2f s)', peak_time));
-legend('Actual Stress', 'Yield Strength', 'Location', 'southeast');
-grid on; axis tight;
-
-% Plot 2: 3D Stress Surface
-subplot(2,2,2);
-surf(T_mesh, X_mesh, stress_matrix/1e6, 'EdgeColor', 'none');
-xlabel('Time [s]'); ylabel('Span Position [m]'); zlabel('Stress [MPa]');
-title('3D Stress Distribution Over Time');
-colorbar; colormap('jet'); view(45, 30); shading interp;
-ylabel(colorbar, 'Stress [MPa]');
-
-% Plot 3: Factor of Safety Heatmap
-subplot(2,2,3);
-imagesc(t, x, safety_factor_stress);
-colorbar;
-title('Factor of Safety (FoS) Distribution');
-xlabel('Time [s]'); ylabel('Span Position [m]');
-colormap('hot');
-caxis([0, min(15, max(safety_factor_stress(:)))]);
-ylabel(colorbar, 'Factor of Safety');
-hold on;
-plot(t(min_sf_t_idx), x(min_sf_x_idx), 'g+', 'MarkerSize', 15, 'LineWidth', 3);
-legend('Min FoS Location', 'Location', 'northwest');
-
-% Plot 4: Minimum Safety Factor Along Span
-subplot(2,2,4);
-plot(x, min(safety_factor_stress, [], 2), 'r-', 'LineWidth', 2);
-hold on;
-yline(config.analysis.safety_factor_req, 'k--', 'Required FoS');
-xlabel('Span Position [m]'); ylabel('Minimum Safety Factor');
-title('Minimum FoS Along Span');
-legend('Actual Min FoS', 'Required FoS', 'Location', 'best');
-grid on; axis tight;
-
-%% 7. Summary Report
-fprintf('\n--- ANALYSIS SUMMARY ---\n');
-fprintf('  Max stress      : %.1f MPa at x=%.2f m, t=%.2f s\n', ...
-    max_stress/1e6, x(max_stress_x_idx), t(max_stress_t_idx));
-fprintf('  Min safety factor : %.2f at x=%.2f m, t=%.2f s\n', ...
-    min_sf, x(min_sf_x_idx), t(min_sf_t_idx));
-
-if min_sf >= config.analysis.safety_factor_req
-    fprintf('  STATUS: ✓ DESIGN PASSES safety requirement (FoS >= %.1f)\n', config.analysis.safety_factor_req);
+fprintf('\nVerdict: ');
+if min_FoS < cfg.safety.fos_critical
+    fprintf('FAIL, minimum FoS %.3f is below the critical threshold.\n', min_FoS);
+elseif min_FoS < cfg.safety.fos_target
+    fprintf('MARGINAL, minimum FoS %.3f clears the critical threshold but not\n', min_FoS);
+    fprintf('         the %.1f target. Stage 6 sizes the section to close the gap.\n', ...
+            cfg.safety.fos_target);
 else
-    fprintf('  STATUS: ✗ DESIGN FAILS safety requirement (FoS < %.1f)\n', config.analysis.safety_factor_req);
+    fprintf('PASS, minimum FoS %.3f meets the %.1f target.\n', min_FoS, cfg.safety.fos_target);
 end
-fprintf('-------------------------\n');
+
+% ------------------------------------------------------------- plots --
+fig = figure('Name', 'Strain and safety', 'NumberTitle', 'off', ...
+             'Position', [100 100 1000 780]);
+
+subplot(2,2,1);
+plot(t_sol, strain(1,:)*1e6, 'LineWidth', 1.6); grid on;
+xlabel('time [s]'); ylabel('strain [microstrain]');
+title('Root strain history');
+
+subplot(2,2,2);
+plot(x, strain(:, i_time)*1e6, 'LineWidth', 1.8); grid on;
+xlabel('spanwise station [m]'); ylabel('strain [microstrain]');
+title(sprintf('Spanwise strain at t = %.2f s', t_sol(i_time)));
+
+subplot(2,2,3);
+imagesc(t_sol, x, min(FoS_field, cfg.safety.fos_plot_cap));
+set(gca, 'YDir', 'normal'); colorbar;
+xlabel('time [s]'); ylabel('spanwise station [m]');
+title(sprintf('Factor of safety field (clipped at %g)', cfg.safety.fos_plot_cap));
+hold on; plot(t_sol(jf_time), x(jf_node), 'w+', 'MarkerSize', 12, 'LineWidth', 2);
+
+subplot(2,2,4);
+plot(x, FoS_span, 'LineWidth', 1.8); hold on;
+plot(x([1 end]), cfg.safety.fos_target*[1 1],   'k--', 'LineWidth', 1.1);
+plot(x([1 end]), cfg.safety.fos_critical*[1 1], 'k:',  'LineWidth', 1.3);
+grid on; xlabel('spanwise station [m]'); ylabel('minimum factor of safety');
+title('Worst-case factor of safety along the span');
+legend('minimum FoS', sprintf('target %.1f', cfg.safety.fos_target), ...
+       sprintf('critical %.1f', cfg.safety.fos_critical), 'Location', 'northwest');
+ylim([0, cfg.safety.fos_plot_cap]);
+
+print(fig, fullfile(paths.results, 'strain_safety.png'), '-dpng', '-r150');
+
+out_file = fullfile(paths.data, 'strain_analysis.mat');
+save(out_file, 'cfg', 'x', 't_sol', 'strain', 'stress', 'FoS_field', ...
+     'FoS_span', 'min_FoS', 'max_strain');
+fprintf('\nSaved %s\n', out_file);
+fprintf('Saved %s\n', fullfile(paths.results, 'strain_safety.png'));

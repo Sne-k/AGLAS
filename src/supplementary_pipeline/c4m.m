@@ -1,156 +1,103 @@
-clc;
-clear;
-close all;
+% =========================================================================
+% AGLAS SUPPLEMENTARY STAGE 4 : BENDING STRESS FIELD
+% =========================================================================
+% Recovers the spanwise and time-resolved bending moment and stress fields
+% from the gust response, and cross-checks the peak against a static hand
+% calculation.
+%
+% Corrections relative to the original version of this script:
+%   - The bending moment was taken to be Phi*q, which is the displacement
+%     field, and then divided by I to get a stress. That is dimensionally
+%     invalid: it produces metres per metre to the fourth, not pascals.
+%     Moment is EI times curvature, so a second spatial derivative is
+%     required and is now taken exactly from the element interpolation.
+%   - The mode shapes were hand-written as sin(i*pi*x/(2L)), which has a
+%     non-zero slope at the clamped root and so violates the cantilever
+%     boundary condition. The real FE modes are used instead.
+%   - The modal response was fabricated as 0.02*sin(2*pi*i*t)*exp(-0.3*t)
+%     rather than taken from the simulation, so nothing downstream depended
+%     on the actual physics.
+%   - The script contradicted itself on geometry, using I = 5e-6 and then
+%     I = b*h^3/12 = 1e-7, and z = 0.05 m for a section only 0.02 m deep.
+%     All geometry now comes from aglas_config.
+%
+% Inputs  : data/structural_model.mat, data/modal_response.mat
+% Outputs : data/stress_field.mat, results/stress_field.png
+% =========================================================================
 
-%% Wing and Beam Properties
-E = 70e9;            % Young's modulus [Pa]
-I = 5e-6;            % Moment of inertia [m^4]
-z = 0.05;            % Distance from neutral axis [m]
-L = 5;               % Wing span [m]
-N = 50;              % Number of spatial nodes
-x = linspace(0, L, N);
-dx = x(2) - x(1);
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-%% Time and Mode Setup
-T = 5;                       % Total time [s]
-dt = 0.01;
-t = 0:dt:T;
-n_t = length(t);
-n_modes = 3;
+load(fullfile(paths.data, 'structural_model.mat'), 'fem');
+load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof', 'gust_info');
 
-%% Generate Synthetic Mode Shapes (Fixed-Free Beam)
-Phi = zeros(N, n_modes);
-for i = 1:n_modes
-    Phi(:, i) = sin((i * pi * x) / (2 * L)); % Simple sinusoidal shapes
-end
+fprintf('=== AGLAS supplementary stage 4: bending stress field ===\n\n');
 
-%% Generate Synthetic Modal Response (e.g., damped response to gust)
-q = zeros(n_modes, n_t);
-for i = 1:n_modes
-    q(i, :) = 0.02 * sin(2 * pi * i * t) .* exp(-0.3 * t);  % Damped sine
-end
+rec = recover_bending(cfg, fem, U_dof.');
 
-%% Compute Displacement Field w(x,t)
-w = Phi * q;   % Reconstruct full displacement
+x       = rec.x(:);
+moment  = rec.moment;              % [n_nodes x n_time]
+stress  = rec.stress;
+sigma_y = cfg.material.sigma_yield;
 
-%% Compute Stress Over Time
-stress = zeros(N, n_t);
-for i = 1:n_t
-    w_i = w(:, i);
-    curvature = gradient(gradient(w_i, dx), dx);  % ∂²w/∂x²
-    stress(:, i) = -E * z * curvature;            % σ = -Ez ∂²w/∂x²
-end
+[peak_M, iM]  = max(abs(moment(:)));
+[nM, tM]      = ind2sub(size(moment), iM);
+[peak_s, is]  = max(abs(stress(:)));
+[ns, ts]      = ind2sub(size(stress), is);
 
-%% Plot Wing Tip Stress Over Time
-figure;
-plot(t, stress(end, :), 'r', 'LineWidth', 2);
-xlabel('Time (s)');
-ylabel('Stress (Pa)');
-title('Wing Tip Bending Stress Over Time');
-grid on;
+fprintf('Peak bending moment : %10.1f N.m at x = %.2f m, t = %.3f s\n', ...
+        peak_M, x(nM), t_sol(tM));
+fprintf('Peak bending stress : %10.2f MPa at x = %.2f m, t = %.3f s\n', ...
+        peak_s/1e6, x(ns), t_sol(ts));
+fprintf('Yield strength      : %10.2f MPa\n', sigma_y/1e6);
+fprintf('Stress utilisation  : %10.1f %% of yield\n', 100*peak_s/sigma_y);
 
-%% Optional: Plot Stress Distribution Along Span at Final Time
-figure;
-plot(x, stress(:, end), 'b', 'LineWidth', 2);
-xlabel('Spanwise Location (m)');
-ylabel('Stress (Pa)');
-title('Stress Distribution at Final Time');
-grid on;
+% --- Independent static cross-check -------------------------------------
+q_peak = max(abs(gust_info.q_line));
+M_hand = q_peak * cfg.geom.L^2 / 2;
+s_hand = M_hand * cfg.section.c_outer / cfg.section.I;
 
-%% Optional: 3D Surface Plot
-figure;
-surf(t, x, stress, 'EdgeColor', 'none');
-xlabel('Time (s)');
-ylabel('Span Position (m)');
-zlabel('Stress (Pa)');
-title('Bending Stress Distribution Over Wing Span and Time');
-colorbar;
-view(45, 30);
-%% 
-% --- INPUTS (reuse from your previous script) ---
-L = 5;              % Wing span (m)
-N = 50;             % Number of spanwise nodes
-x = linspace(0, L, N);     % Spanwise positions
-b = 0.15;           % Width of wing section (m)
-h = 0.02;           % Height of wing section (m)
-I = (b * h^3) / 12; % Moment of inertia
-E = 70e9;           % Young’s modulus (Pa)
-c = h / 2;          % Distance to outer fiber
+fprintf('\nStatic cross-check at the peak line load of %.1f N/m\n', q_peak);
+fprintf('  hand calculation  M = q*L^2/2      : %10.1f N.m\n', M_hand);
+fprintf('  hand calculation  sigma = M*c/I    : %10.2f MPa\n', s_hand/1e6);
+fprintf('  dynamic result relative to static  : %10.3f\n', peak_s/s_hand);
+fprintf('  The ratio is the dynamic amplification factor. A value near one is\n');
+fprintf('  expected because the %.1f s gust is slow next to the %.3f s period\n', ...
+        cfg.gust.t_g, 1/sqrt(cfg.section.EI/(cfg.section.m_total*cfg.geom.L^4))/0.5596/(2*pi)*(2*pi));
 
-% --- Load or define q and Phi ---
-% q (n_modes x time), Phi (N x n_modes), t (1 x time)
+% --- Plot ---------------------------------------------------------------
+fig = figure('Name', 'Bending stress field', 'NumberTitle', 'off', ...
+             'Position', [100 100 1000 760]);
 
-% --- Compute stress ---
-M = Phi * q;                         % Bending moment at each span point over time (N x time)
-stress_matrix = -c * M / I;         % Stress (Pa) (N x time)
+subplot(2,2,1);
+plot(x, moment(:, tM)/1000, 'LineWidth', 1.8); hold on;
+plot(x, (q_peak*(cfg.geom.L - x).^2/2)/1000, '--', 'LineWidth', 1.4);
+grid on; xlabel('spanwise station [m]'); ylabel('bending moment [kN m]');
+title('Spanwise bending moment at the peak instant');
+legend('FE recovery', 'static q(L-x)^2/2', 'Location', 'northeast');
 
-% --- Compute strain ---
-strain_matrix = stress_matrix / E;  % Strain (unitless)
+subplot(2,2,2);
+plot(t_sol, stress(1,:)/1e6, 'LineWidth', 1.6); hold on;
+plot(t_sol, stress(round(end/2),:)/1e6, '--', 'LineWidth', 1.4);
+grid on; xlabel('time [s]'); ylabel('stress [MPa]');
+title('Stress history');
+legend('root', 'mid-span', 'Location', 'northeast');
 
-% --- Plot Strain over Time at Wing Tip ---
-figure;
-plot(t, strain_matrix(end, :), 'r', 'LineWidth', 1.5);
-xlabel('Time (s)');
-ylabel('Strain');
-title('Wing Tip Strain Over Time');
-max(abs(strain_matrix(:, end)))
+subplot(2,2,3);
+imagesc(t_sol, x, stress/1e6); set(gca, 'YDir', 'normal');
+colorbar; xlabel('time [s]'); ylabel('spanwise station [m]');
+title('Stress field [MPa]');
 
-% --- Plot Spanwise Strain at Final Time ---
-figure;
-plot(x, strain_matrix(:, end), 'b', 'LineWidth', 1.5);
-xlabel('Spanwise Location (m)');
-ylabel('Strain');
-title('Strain Distribution at Final Time');
+subplot(2,2,4);
+surf(t_sol, x, stress/1e6, 'EdgeColor', 'none');
+xlabel('time [s]'); ylabel('span [m]'); zlabel('stress [MPa]');
+title('Stress over span and time'); view(40, 32); colorbar;
 
-% --- 3D Surface Plot of Strain Over Time and Span ---
-figure;
-surf(t, x, strain_matrix, 'EdgeColor', 'none');
-xlabel('Time (s)');
-ylabel('Span Position (m)');
-zlabel('Strain');
-title('Strain Distribution Over Wing Span and Time');
-colorbar;
-view(135, 30);
+print(fig, fullfile(paths.results, 'stress_field.png'), '-dpng', '-r150');
 
-% === Load or use your stress matrix ===
-% Assume `stress_matrix` is already in workspace
-
-% === Material Property ===
-sigma_yield = 345e6; % Pa, for Aluminum 2024-T3
-
-% === Calculate FoS ===
-FoS_matrix = sigma_yield ./ abs(stress_matrix);  % Element-wise
-
-% === Clip extreme values for plotting ===
-FoS_matrix(FoS_matrix > 10) = 10;
-
-% === Plotting ===
-figure;
-imagesc(FoS_matrix);
-colorbar;
-title('Factor of Safety Distribution');
-xlabel('Spanwise Elements');
-ylabel('Chordwise Elements');
-colormap jet;
-% Example FoS matrix (replace with your real FoS data)
-FoS_matrix = rand(50, 500)*3 + 8;  % Dummy safe data: FoS ~ [8–11]
-
-% Define custom colormap
-custom_map = [1 0 0;    % Red for FoS < 1.5
-              1 1 0;    % Yellow for 1.5 <= FoS < 2.5
-              0 1 0];   % Green for FoS >= 2.5
-
-% Classify FoS regions
-FoS_classified = zeros(size(FoS_matrix));
-FoS_classified(FoS_matrix < 1.5) = 1;       % Red
-FoS_classified(FoS_matrix < 2.5 & FoS_matrix >= 1.5) = 2;  % Yellow
-FoS_classified(FoS_matrix >= 2.5) = 3;      % Green
-
-% Plot with warning zones
-figure;
-imagesc(FoS_classified);
-colormap(custom_map);
-colorbar('Ticks', [1 2 3], 'TickLabels', {'<1.5 (Critical)', '1.5-2.5 (Caution)', '≥2.5 (Safe)'});
-xlabel('Spanwise Elements');
-ylabel('Chordwise Elements');
-title('Factor of Safety Zones');
+out_file = fullfile(paths.data, 'stress_field.mat');
+save(out_file, 'cfg', 'x', 't_sol', 'moment', 'stress', 'peak_s', 'peak_M', ...
+     'M_hand', 's_hand');
+fprintf('\nSaved %s\n', out_file);
+fprintf('Saved %s\n', fullfile(paths.results, 'stress_field.png'));

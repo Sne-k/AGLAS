@@ -37,7 +37,8 @@ fprintf('Retaining %d modes: %s Hz\n', n_modes, ...
 t_grid = 0:cfg.time.dt_out:cfg.time.t_end;
 wg     = gust_one_minus_cos(t_grid, cfg.gust.U_ds, cfg.gust.t_g);
 
-[F_fun, gust_info] = gust_modal_force(cfg, fem, md, t_grid, wg, 'kussner');
+[t_sol, q_sol, U_dof, gust_info] = ...
+    solve_modal_response(cfg, fem, md, t_grid, wg, 'kussner', cfg.gust.t_g/20);
 
 fprintf('Gust: 1-cosine, peak %.1f m/s over %.2f s at U = %.1f m/s\n', ...
         cfg.gust.U_ds, cfg.gust.t_g, cfg.flight.U_inf);
@@ -52,28 +53,7 @@ if ~gust_info.linear_aero_ok
        gust_info.d_alpha_deg, cfg.limits.max_delta_alpha);
 end
 
-% --- Modal equations of motion -----------------------------------------
-% Mass-normalised modes give M_modal = I exactly, so the damping matrix
-% diag(2*zeta*omega) is the correct 2 % of critical in every mode.
-zeta    = cfg.damping.zeta;
-omega   = md.omega(:);
-C_modal = 2 * zeta * omega;
-K_modal = omega.^2;
-
-odefun = @(t, x) [ x(n_modes+1:end);
-                   F_fun(t) - C_modal.*x(n_modes+1:end) - K_modal.*x(1:n_modes) ];
-
-opts = odeset('RelTol', cfg.time.rel_tol, 'AbsTol', cfg.time.abs_tol, ...
-              'MaxStep', cfg.gust.t_g/20);
-
-x0 = zeros(2*n_modes, 1);
-[t_sol, x_sol] = ode45(odefun, t_grid, x0, opts);
-
-t_sol = t_sol(:);
-q_sol = x_sol(:, 1:n_modes);
-
 % --- Reconstruct the physical field -------------------------------------
-U_dof   = (md.Phi * q_sol.').';              % [n_time x n_dof]
 w_field = [zeros(size(q_sol,1),1), U_dof(:, fem.idx_w)];
 tip_w   = w_field(:, end);
 

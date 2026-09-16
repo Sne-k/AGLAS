@@ -92,8 +92,20 @@ function [F_fun, info] = gust_modal_force(cfg, fem, modes, t_grid, wg, unsteady)
 
     F_modal = g_lift * q_line + g_torque * m_line;   % [n_modes x n_t]
 
-    % Zero-order hold outside the supplied grid; linear interpolation inside.
-    F_fun = @(t) interp_force(t, t_grid, F_modal);
+    % Linear interpolation inside the grid, held constant outside it.
+    % The transposed copy and the uniform-grid test are hoisted out of the
+    % closure: this handle is evaluated once per ODE stage, tens of thousands
+    % of times per run, so allocating or re-deriving anything inside it
+    % dominates the cost of the whole simulation.
+    Fm_t = F_modal.';
+    dt_u = NaN;
+    if numel(t_grid) > 2
+        d = diff(t_grid);
+        if max(abs(d - d(1))) <= 1e-12 * max(1, abs(d(1)))
+            dt_u = d(1);
+        end
+    end
+    F_fun = @(t) interp_force(t, t_grid, F_modal, Fm_t, dt_u);
 
     % --- diagnostics ------------------------------------------------------
     info.q_line       = q_line;
@@ -110,13 +122,27 @@ function [F_fun, info] = gust_modal_force(cfg, fem, modes, t_grid, wg, unsteady)
 end
 
 % ------------------------------------------------------------------------
-function F = interp_force(t, tg, Fm)
+function F = interp_force(t, tg, Fm, Fm_t, dt_u)
+%INTERP_FORCE  Linear interpolation of the generalised force at time t.
+%   On a uniform grid the bracketing index is found by arithmetic, which is
+%   O(1); otherwise fall back to interp1 on the pre-transposed matrix.
+
     if t <= tg(1)
         F = Fm(:,1);
+        return;
     elseif t >= tg(end)
         F = Fm(:,end);
+        return;
+    end
+
+    if isfinite(dt_u)
+        pos = (t - tg(1)) / dt_u;
+        i0  = floor(pos) + 1;
+        i0  = min(max(i0, 1), numel(tg) - 1);
+        w   = (t - tg(i0)) / dt_u;
+        F   = (1-w)*Fm(:,i0) + w*Fm(:,i0+1);
     else
-        F = interp1(tg, Fm.', t, 'linear').';
+        F = interp1(tg, Fm_t, t, 'linear').';
     end
 end
 
