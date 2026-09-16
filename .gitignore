@@ -20,3 +20,6 @@ animation/*.gif
 # OS
 .DS_Store
 Thumbs.db
+
+# GNU Octave crash-dump workspace
+octave-workspace
