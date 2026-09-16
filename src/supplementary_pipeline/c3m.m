@@ -1,73 +1,105 @@
-clc;
-clear;
-close all;
+% =========================================================================
+% AGLAS SUPPLEMENTARY STAGE 3 : GUST RESPONSE COMPARISON
+% =========================================================================
+% Compares the wing response under three load models:
+%   1  quasi-steady aerodynamics, discrete 1-cosine gust
+%   2  Kussner unsteady lag,      discrete 1-cosine gust
+%   3  Kussner unsteady lag,      von Karman continuous turbulence
+%
+% Quantifies the dynamic amplification factor, the ratio of the peak dynamic
+% deflection to the deflection the same peak load would produce statically.
+%
+% Inputs  : data/structural_model.mat
+% Outputs : data/turbulence_response.mat, results/response_comparison.png
+% =========================================================================
 
-%% 1. LOAD WING STRUCTURAL MODEL
-fprintf('Loading structural model from c2m.m...\n');
-if ~exist('structural_model.mat', 'file')
-    error('structural_model.mat not found. Please run the corrected c2m.m script first.');
-end
-% **MODIFIED**: Loads the new V_eigenvectors and V_deflection variables
-load('structural_model.mat', 'M', 'K', 'V_eigenvectors', 'V_deflection', 'freqs', 'L', 'N');
+clear; close all; clc;
+addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
+paths = aglas_paths();
 
-%% 2. SETUP MODAL PARAMETERS
-fprintf('Setting up modal system for dynamic analysis...\n');
-n_modes = 3; % Number of modes to include in the simulation
+load(fullfile(paths.data, 'structural_model.mat'), 'cfg', 'fem', 'modes');
 
-% **MODIFIED**: Use the FULL eigenvectors for modal transformation
-V_modes_full = V_eigenvectors(:, 1:n_modes);
+fprintf('=== AGLAS supplementary stage 3: response comparison ===\n\n');
 
-% Calculate generalized modal properties using the full eigenvectors
-M_modal = diag(diag(V_modes_full' * M * V_modes_full));
-K_modal = diag(diag(V_modes_full' * K * V_modes_full));
+n_modes = cfg.fem.n_modes;
+md = modes;
+md.Phi     = modes.Phi(:, 1:n_modes);
+md.omega   = modes.omega(1:n_modes);
+md.freq_hz = modes.freq_hz(1:n_modes);
+md.n_modes = n_modes;
 
-% Define modal damping
-zeta = 0.02; % 2% damping ratio
-omega = 2 * pi * freqs(1:n_modes);
-C_modal = diag(2 * zeta * omega);
+% --- Case 1 and 2: discrete gust ---------------------------------------
+t1 = 0:cfg.time.dt_out:cfg.time.t_end;
+wg1 = gust_one_minus_cos(t1, cfg.gust.U_ds, cfg.gust.t_g);
 
-%% 3. DEFINE GUST LOAD
-V_gust = 10; t_gust = 2;
+[tA, qA, UA, giA] = solve_modal_response(cfg, fem, md, t1, wg1, 'quasisteady', cfg.gust.t_g/20);
+[tB, qB, UB, giB] = solve_modal_response(cfg, fem, md, t1, wg1, 'kussner',     cfg.gust.t_g/20);
+tipA = UA(:, fem.idx_w(end));
+tipB = UB(:, fem.idx_w(end));
 
-% **MODIFIED**: The force distribution must match the size of the full system (M and K)
-% We create a force vector that applies force only to the deflection degrees of freedom
-force_distribution = zeros(size(K, 1), 1);
-force_distribution(1:2:end) = 1; % Apply force to deflection DOFs, not rotation
+% Static deflection under the same peak load, for the amplification factor.
+f_static  = consistent_line_load(fem, max(abs(giB.q_line)), max(abs(giB.m_line)));
+u_static  = fem.K \ f_static;
+w_static  = u_static(fem.idx_w(end));
 
-% Transform the spatial force into a generalized modal force using full eigenvectors
-F_generalized = V_modes_full' * force_distribution;
+fprintf('Discrete 1-cosine gust, %0.1f m/s over %.1f s\n', cfg.gust.U_ds, cfg.gust.t_g);
+fprintf('  peak tip deflection, quasi-steady : %8.4f m\n', max(abs(tipA)));
+fprintf('  peak tip deflection, Kussner      : %8.4f m\n', max(abs(tipB)));
+fprintf('  Kussner reduces the peak by        %8.2f %%\n', ...
+        100*(max(abs(tipA))-max(abs(tipB)))/max(abs(tipA)));
+fprintf('  static deflection at peak load    : %8.4f m\n', w_static);
+fprintf('  dynamic amplification factor      : %8.3f\n', max(abs(tipB))/w_static);
+fprintf('  first bending period %.3f s vs gust duration %.2f s\n', ...
+        1/md.freq_hz(1), cfg.gust.t_g);
+fprintf('  The gust is slow relative to the structure, so the amplification\n');
+fprintf('  factor is close to one, as expected.\n');
 
-% Gust load function
-gust_force_function = @(t) (t <= t_gust) * (0.5 * V_gust * (1 - cos(pi * t / t_gust))) * F_generalized;
+% --- Case 3: continuous turbulence -------------------------------------
+T_turb = 30;   % long enough for stable RMS statistics, short enough to run fast
+[wg3, t3] = gust_von_karman(cfg, T_turb, cfg.time.dt_out);
+[tC, qC, UC, giC] = solve_modal_response(cfg, fem, md, t3, wg3, 'kussner', 0.02);
+tipC = UC(:, fem.idx_w(end));
 
-%% 4. SOLVE THE EQUATIONS OF MOTION
-% (No changes in this section)
-odefun = @(t, x) [x(n_modes+1:end); M_modal \ (gust_force_function(t) - C_modal*x(n_modes+1:end) - K_modal*x(1:n_modes))];
-x0 = zeros(2*n_modes, 1);
-tspan = [0 5];
-[t_sol, x_sol] = ode45(odefun, tspan, x0);
+fprintf('\nvon Karman continuous turbulence, %.0f s record\n', T_turb);
+fprintf('  gust RMS                          : %8.3f m/s\n', std(wg3));
+fprintf('  tip deflection RMS                : %8.4f m\n', std(tipC));
+fprintf('  tip deflection peak               : %8.4f m\n', max(abs(tipC)));
+fprintf('  peak-to-RMS ratio                 : %8.2f\n', max(abs(tipC))/std(tipC));
 
-%% 5. RECONSTRUCT PHYSICAL DISPLACEMENT
-fprintf('Reconstructing physical displacement...\n');
-q_sol = x_sol(:, 1:n_modes);
+% --- Plot ---------------------------------------------------------------
+fig = figure('Name', 'Gust response comparison', 'NumberTitle', 'off', ...
+             'Position', [100 100 950 900]);
 
-% **MODIFIED**: Use the deflection-only shapes to reconstruct the final displacement
-V_modes_deflection = V_deflection(:, 1:n_modes);
-V_tip = V_modes_deflection(end, :); % Deflection shape at the wing tip
-wing_tip_disp = q_sol * V_tip';
+subplot(4,1,1);
+plot(t1, giA.q_line/1000, 'LineWidth', 1.6); hold on;
+plot(t1, giB.q_line/1000, '--', 'LineWidth', 1.6);
+grid on; ylabel('line load [kN/m]');
+legend('quasi-steady', 'Kussner lag', 'Location', 'northeast');
+title('Aerodynamic line load from the discrete gust');
 
-%% 6. PLOT AND SAVE RESULTS
-% (No changes in this section)
-fprintf('Plotting results and saving data...\n');
-figure('Name', 'Wing Tip Gust Response', 'NumberTitle', 'off');
-plot(t_sol, wing_tip_disp, 'r', 'LineWidth', 1.5);
-xlabel('Time (s)'); ylabel('Wing Tip Displacement (m)');
-title('Realistic Wing Tip Response to Gust Load'); grid on;
+subplot(4,1,2);
+plot(tA, tipA, 'LineWidth', 1.6); hold on;
+plot(tB, tipB, '--', 'LineWidth', 1.6);
+plot([tA(1) tA(end)], [w_static w_static], 'k:', 'LineWidth', 1.2);
+grid on; xlabel('time [s]'); ylabel('tip deflection [m]');
+legend('quasi-steady', 'Kussner lag', 'static at peak load', 'Location', 'northeast');
+title('Tip response to the discrete gust');
 
-% Save results for c5m.m
-save('modal_response.mat', 'q_sol', 't_sol', 'n_modes');
-% Use the existing 'modal_shapes.mat' name but with the corrected variables
-V = V_deflection;
-save('modal_shapes.mat', 'V', 'freqs', 'N', 'L');
+subplot(4,1,3);
+plot(t3, wg3, 'LineWidth', 0.9); grid on;
+ylabel('gust [m/s]'); xlim([t3(1) t3(end)]);
+title(sprintf('von Karman turbulence input (RMS %.2f m/s)', std(wg3)));
 
-fprintf('Analysis complete. Response data saved.\n');
+subplot(4,1,4);
+plot(tC, tipC, 'LineWidth', 1.1); grid on;
+xlabel('time [s]'); ylabel('tip deflection [m]'); xlim([t3(1) t3(end)]);
+title(sprintf('Tip response to turbulence (RMS %.3f m, peak %.3f m)', ...
+              std(tipC), max(abs(tipC))));
+
+print(fig, fullfile(paths.results, 'response_comparison.png'), '-dpng', '-r150');
+
+out_file = fullfile(paths.data, 'turbulence_response.mat');
+save(out_file, 'cfg', 'tA', 'tipA', 'tB', 'tipB', 'tC', 'tipC', ...
+     'qA', 'qB', 'qC', 'wg1', 'wg3', 't1', 't3', 'w_static');
+fprintf('\nSaved %s\n', out_file);
+fprintf('Saved %s\n', fullfile(paths.results, 'response_comparison.png'));

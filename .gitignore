@@ -1,0 +1,25 @@
+# Claude Code project context (local only)
+.claude/
+
+# MATLAB
+*.asv
+*.autosave
+*.m~
+slprj/
+codegen/
+
+# Generated analysis products. Regenerate everything with run_aglas.
+# The .mat files are large binaries and are fully reproducible from the
+# scripts, so they are not tracked. The figures are kept so the repository
+# documents its own results without needing MATLAB to view them.
+data/*.mat
+results/*.fig
+results/*.pdf
+animation/*.gif
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GNU Octave crash-dump workspace
+octave-workspace
