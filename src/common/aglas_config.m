@@ -87,7 +87,10 @@ function cfg = aglas_config(preset)
     cfg.sensor.gust_psd         = 0.05;
 
     % LQR cost weights. R is swept during tuning; these are the defaults the
-    % design scripts start from. See c4c for the trade study.
+    % design scripts start from. See docs/control-design-log.md section 4 for
+    % the trade study. Every control result quoted in the README uses
+    % r_command = 0.3 (set by aglas_sim_setup), not this default of 1.0,
+    % which gives a far more timid controller (about 26 % load reduction).
     cfg.lqr.q_moment            = 1.0;   % weight on root bending moment
     cfg.lqr.q_tip               = 0.0;   % weight on tip deflection
     cfg.lqr.r_command           = 1.0;   % weight on commanded deflection

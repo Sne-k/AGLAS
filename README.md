@@ -28,6 +28,14 @@ run_aglas('supplementary')   % supplementary only        (c1m ... c6m)
 run_aglas('tests')           % verification suite only
 ```
 
+`run_aglas('main')` and `run_aglas('supplementary')` still run the full
+verification suite first and abort if any check fails; pass `false` as a
+second argument to skip it, e.g. `run_aglas('main', false)`. The
+supplementary pipeline reads the structural model and gust response written
+by the main pipeline (`c3m`, `c4m`), so `run_aglas('supplementary')` on its
+own only works after `run_aglas('main')` has been run at least once — for a
+single self-contained run, use `run_aglas` or `run_aglas('both')`.
+
 Closed-loop control, in Simulink:
 
 ```matlab
@@ -133,7 +141,7 @@ src/supplementary_pipeline/
                       c1m..c6m  gust models, mesh convergence, response
                                 comparison, stress field, strain, sizing
 simulink/                       closed-loop model, built by script
-tests/                          verification suite, 76 checks
+tests/                          verification suite, 90 checks
 docs/control-design-log.md      full control design record, including dead ends
 data/                           generated .mat results
 results/                        generated figures
@@ -145,8 +153,11 @@ results/                        generated figures
 addpath('tests'); run_all_tests
 ```
 
-76 checks, all against closed-form references rather than previously recorded
-output. A suite that only compared against stored numbers would have locked in
+90 checks. The 76 physics checks are all against closed-form references rather
+than previously recorded output; the 14 control checks cover the Riccati,
+Lyapunov and controllability routines against closed forms, and pin the
+closed-loop results in the table above so a change to the controller cannot
+silently move them. A suite that only compared against stored numbers would have locked in
 the defects this code was written to remove.
 
 | Check | Reference | Agreement |
@@ -158,10 +169,13 @@ the defects this code was written to remove.
 | Theodorsen `C(k)` | published tables, k = 0.1 to 1.0 | 8e-5 absolute |
 | von Karman spectrum | its own -5/3 inertial slope | -1.6666 against -1.6667 |
 | Divergence speed | `GJ*(pi/2L)^2/(c*e*cl_alpha)` | 0.026 % |
-| Riccati solver | double integrator, `K = [1, sqrt(3)]` | exact |
+| Riccati solver | double integrator, `K = [1, sqrt(3)]` | residual 3e-15 |
+| Lyapunov solver | scalar `A = -1, Q = 2`, `P = 1` | exact |
+| LQG / MRAC / policy search | peak root moment reductions in the table above | reproduced to 0.1 % |
 
 The Simulink model is checked separately against the MATLAB reference by
-`compare_simulink`, and agrees to **0.003 %** on peak root moment.
+`compare_simulink`, and agrees to **0.003 %** on peak root moment and peak
+command, and 0.007 % RMS over the waveform.
 
 ## Known limitations
 

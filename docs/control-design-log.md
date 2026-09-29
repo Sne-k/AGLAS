@@ -131,23 +131,28 @@ root moment 145.2 kN m.
 
 | r_command | Peak moment | Reduction | Peak deflection | Saturated |
 |---|---|---|---|---|
-| 0.001 | 931.1 kN m | **-536 %** | 20.2 deg | 90.6 % |
-| 0.01 | 73.1 kN m | 50.1 % | 20.1 deg | 16.6 % |
-| 0.1 | 69.3 kN m | 52.6 % | 20.0 deg | 8.6 % |
-| **0.3** | **64.9 kN m** | **55.6 %** | **18.1 deg** | **0 %** |
-| 1 | 104.0 kN m | 29.0 % | 9.3 deg | 0 % |
-| 10 | 138.5 kN m | 5.4 % | 1.6 deg | 0 % |
+| 0.001 | 73.4 kN m | 49.5 % | 20.1 deg | 85.5 % |
+| 0.01 | 64.0 kN m | 55.9 % | 20.1 deg | 14.5 % |
+| 0.1 | 63.9 kN m | 56.0 % | 20.0 deg | 10.5 % |
+| **0.3** | **68.4 kN m** | **52.9 %** | **17.9 deg** | **0 %** |
+| 1 | 108.1 kN m | 25.6 % | 8.7 deg | 0 % |
+| 10 | 140.3 kN m | 3.4 % | 1.1 deg | 0 % |
 
 **r = 0.3 is the design point**: best reduction available without touching a
-limit.
+limit. The two cheaper-control rows beat it by about three points, but only by
+riding the deflection stop for 10 to 15 % of the event, which leaves no margin
+for a larger gust.
 
-The r = 0.001 row is the most instructive in the table. Asking for more
-authority than the surface has does not merely stop helping, it makes the load
-**six times worse than doing nothing**. LQR is optimal for the unconstrained
-linear problem and has no representation of the actuator limits, so it happily
-designs a gain that saturates, and a saturated loop is no longer the loop that
-was designed. Any claim that an optimal controller is safe by construction
-should be read against this row.
+The r = 0.001 row is the instructive one. Asking for more authority than the
+surface has stops helping: the loop sits on a limit 85 % of the time and does
+worse than r = 0.3. LQR is optimal for the unconstrained linear problem and has
+no representation of the actuator limits, so it happily designs a gain that
+saturates, and a saturated loop is no longer the loop that was designed.
+
+*Table re-measured after the actuator-limit alignment between Simulink and the
+`.m` reference. An earlier version of this table, measured before that fix,
+reported r = 0.001 as six times worse than no control (-536 %) and r = 0.3 as
+55.6 %; neither reproduces with the current limiter.*
 
 ---
 
@@ -304,12 +309,16 @@ a diff and regenerated when the design matrices change. Fixed-step ode4 at
 2e-4 s, because the rate limiter is a stateful nonlinearity that a
 reject-and-retry solver can corrupt.
 
-**Not executed.** No Simulink licence was available where it was written. All
-block dimensions were checked against the design matrices, but a block diagram
-can be wrong in ways that raise no error: a swapped Mux order, a Selector off
-by one, a sign on a Sum. `compare_simulink.m` runs the model against the
-verified `.m` path on identical inputs and reports the difference. Run it before
-trusting any model output.
+Written without a Simulink licence, so all block dimensions were first checked
+only against the design matrices. A block diagram can be wrong in ways that
+raise no error: a swapped Mux order, a Selector off by one, a sign on a Sum.
+`compare_simulink.m` runs the model against the verified `.m` path on
+identical inputs and reports the difference.
+
+**Since executed.** With MRAC on at the nominal condition, the model matches
+the `.m` reference to 0.003 % on peak root moment (71.47 kN m in both) and on
+peak command (17.26 deg), 0.007 % RMS over the waveform and 0.008 % worst
+pointwise. Rerun `compare_simulink` after any change to the design matrices.
 
 ---
 
@@ -319,9 +328,9 @@ trusting any model output.
 |---|---|
 | Selection of control algorithm | Done. LQG with a gust-estimating observer, evidence in sections 3 to 5. |
 | Algorithm implementation | Done, toolbox-free, in `src/common`. |
-| Preliminary tuning | Done, section 4. Design point r = 0.3, 55.6 % load reduction. |
+| Preliminary tuning | Done, section 4. Design point r = 0.3, 52.9 % load reduction. |
 | MRAC | Implemented and evaluated. Does not help on this aircraft; section 5. |
-| Simulink model | Built, untested here, awaiting a run. |
+| Simulink model | Built and verified against the `.m` reference to 0.003 %; section 9. |
 | Reinforcement learning | Done as direct policy search; section 11. |
 
 ---
@@ -405,8 +414,10 @@ is simply spending authority the LQG's `R` weight was holding back.
 
 That is still a real finding rather than an artefact. `R` is an indirect proxy:
 there is no way to tell an LQR "use all the authority available and no more",
-and section 4 shows that trying to force it there by lowering `R` makes things
-catastrophically worse, because the linear design has no idea the limit exists.
+and section 4 shows that trying to force it there by lowering `R` gains about
+three points at best, spends 10 to 15 % of the event on the stop, and then
+gets worse again as `R` falls further, because the linear design has no idea
+the limit exists. Policy search beats every one of those rows.
 Policy search optimises the real objective under the real constraint and finds
 the boundary directly. The cost is that the tuned design operates with no
 deflection margin, which is a trade a designer should make deliberately rather
