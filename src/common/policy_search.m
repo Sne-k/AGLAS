@@ -22,9 +22,9 @@ function out = policy_search(cfg, P, base, t, wg, opts)
 %          optima.
 %       2. It is derived for a linear plant. The real loop has a deflection
 %          limit and a slew limit, and LQR has no representation of either. The
-%          tuning sweep in the design log shows how badly that can bite: at
-%          r_command = 0.001 the linear-optimal design saturates so hard that
-%          the peak load becomes six times worse than no control at all.
+%          tuning sweep in the design log shows it: at r_command = 0.001 the
+%          linear-optimal design sits on the deflection stop 85 % of the time
+%          and does worse than a more modest gain.
 %
 %     So there is a genuine gap, and it is exactly the gap a learned policy can
 %     close: optimise the real objective on the real, saturated plant.

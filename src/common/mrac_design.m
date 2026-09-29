@@ -5,8 +5,8 @@ function ctrl = mrac_design(cfg, P, base, opts)
 %   ctrl = MRAC_DESIGN(cfg, P, base, opts)
 %
 %   base is the LQG controller from LQG_DESIGN. opts may set:
-%     .gamma   adaptation rate (scalar or ns-vector), default 5e3
-%     .sigma   sigma-modification leakage, default 1e-2
+%     .gamma   adaptation rate (scalar or ns-vector), default 5
+%     .sigma   sigma-modification leakage, default 2e-1
 %     .theta_max  bound on the adaptive parameter norm, default 5
 %
 %   Why adapt at all
