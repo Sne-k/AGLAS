@@ -33,7 +33,7 @@ fprintf('  value at t = t_g     : %.3e  (must be 0)\n', ...
         interp1(t, wg_disc, cfg.gust.t_g));
 
 % --- von Karman continuous turbulence ----------------------------------
-T_turb = 200;                        % long record for a converged spectrum
+T_turb = cfg.turb.T_spectrum;
 [wg_turb, t_turb, vk] = gust_von_karman(cfg, T_turb, dt);
 
 fprintf('\nvon Karman continuous turbulence\n');

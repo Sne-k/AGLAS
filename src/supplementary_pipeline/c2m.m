@@ -92,7 +92,6 @@ f_coupled = modal_analysis(beam_fem(c_fine), 6).freq_hz;
 
 c_bal = c_fine;
 c_bal.geom.cg_frac = c_bal.geom.ea_frac;       % CG moved onto the elastic axis
-c_bal.aero.x_alpha = 0;
 c_bal.section = section_properties(c_bal);
 f_balanced = modal_analysis(beam_fem(c_bal), 6).freq_hz;
 

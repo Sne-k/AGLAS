@@ -29,7 +29,7 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'strain_analysis.mat'), ...
+aglas_load(fullfile(paths.data, 'strain_analysis.mat'), ...
      'cfg', 'x', 't_sol', 'FoS_field', 'min_FoS');
 
 fprintf('=== AGLAS supplementary stage 6: safety zones and sizing ===\n\n');

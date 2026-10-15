@@ -13,7 +13,7 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'wing_geom.mat'), 'cfg');
+aglas_load(fullfile(paths.data, 'wing_geom.mat'), 'cfg');
 
 fprintf('=== AGLAS Stage 2: structural model ===\n\n');
 

@@ -29,8 +29,8 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'structural_model.mat'), 'fem');
-load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof', 'gust_info');
+aglas_load(fullfile(paths.data, 'structural_model.mat'), 'fem');
+aglas_load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof', 'gust_info');
 
 fprintf('=== AGLAS supplementary stage 4: bending stress field ===\n\n');
 

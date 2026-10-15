@@ -19,11 +19,21 @@ function P = lyap_solve(A, Q)
 
     I = eye(n);
     M = kron(I, A.') + kron(A.', I);
+    if rcond(M) < 1e-14
+        error('lyap_solve:illConditioned', ...
+              ['The Lyapunov system is numerically singular (rcond %.1e); A is ' ...
+               'too close to marginal stability for a reliable solution.'], rcond(M));
+    end
     P = reshape(-(M \ Q(:)), n, n);
     P = (P + P.')/2;
 
+    % Small residuals only warn; a large one means P cannot certify the
+    % adaptive law that is built on it, so it stops.
     res = norm(A.'*P + P*A + Q, 'fro') / max(1, norm(Q, 'fro'));
-    if res > 1e-8
+    if res > 1e-6
+        error('lyap_solve:residual', ...
+              'Lyapunov residual %.2e is too large to trust the solution.', res);
+    elseif res > 1e-8
         warning('lyap_solve:residual', ...
                 'Lyapunov residual %.2e is larger than expected.', res);
     end

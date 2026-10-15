@@ -49,6 +49,13 @@ function cfg = aglas_config(preset)
     cfg.turb.sigma       = 3.0;    % turbulence RMS velocity            [m/s]
     cfg.turb.L_scale     = 762;    % von Karman length scale (MIL-8785) [m]
     cfg.turb.seed        = 20250907; % fixed RNG seed => reproducible
+    cfg.turb.T_spectrum  = 200;    % record for the spectrum check: long enough
+                                   % for a converged PSD estimate          [s]
+    cfg.turb.T_response  = 30;     % record for the wing response: stable RMS,
+                                   % short enough to integrate quickly     [s]
+    cfg.turb.dt_kussner  = 0.02;   % Kussner recurrence step for turbulence;
+                                   % the discrete gust uses t_g/20, which is
+                                   % far too coarse for broadband input   [s]
 
     % --- Structural damping (modal, fraction of critical)
     cfg.damping.zeta     = 0.02;   % 2 % of critical in every retained mode
@@ -157,16 +164,11 @@ function cfg = aglas_config(preset)
 
     % --- Derived aerodynamics
     cfg.aero.semi_chord = cfg.geom.chord / 2;
-    % Lift-curve slope corrected for finite aspect ratio (Helmbold, incompressible).
-    AR = 2 * cfg.geom.L / cfg.geom.chord;          % full-wing aspect ratio
-    cfg.aero.AR      = AR;
+    cfg.aero.AR      = 2 * cfg.geom.L / cfg.geom.chord;   % full-wing aspect ratio
     cfg.aero.cl_alpha_2d = 2 * pi;                  % thin-airfoil value  [1/rad]
-    cfg.aero.CL_alpha    = 2*pi*AR / (2 + sqrt(AR^2 + 4));
     % Distance from mid-chord to elastic axis, non-dimensional on semi-chord.
     % Positive aft. Theodorsen's 'a'.
     cfg.aero.a_ea  = (cfg.geom.ea_frac - 0.5) / 0.5;
-    % Distance from elastic axis to CG, non-dimensional on semi-chord ('x_alpha').
-    cfg.aero.x_alpha = (cfg.geom.cg_frac - cfg.geom.ea_frac) / 0.5;
 
     % --- Derived section properties
     cfg.section = section_properties(cfg);

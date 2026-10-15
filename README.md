@@ -153,6 +153,9 @@ results/                        generated figures
 addpath('tests'); run_all_tests
 ```
 
+The same suite runs on GitHub Actions for every push to `main` and every pull
+request (`.github/workflows/tests.yml`).
+
 90 checks. The 76 physics checks are all against closed-form references rather
 than previously recorded output; the 14 control checks cover the Riccati,
 Lyapunov and controllability routines against closed forms, and pin the

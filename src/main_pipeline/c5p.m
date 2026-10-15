@@ -16,7 +16,7 @@ SAVE_GIF    = true;
 MAX_FRAMES  = 80;      % cap the frame count so the GIF stays a sane size
 FRAME_DELAY = 0.06;    % seconds between GIF frames
 
-load(fullfile(paths.data, 'modal_response.mat'), ...
+aglas_load(fullfile(paths.data, 'modal_response.mat'), ...
      'cfg', 't_sol', 'w_field', 'tw', 'wg', 't_grid');
 
 fprintf('=== AGLAS Stage 5: animation ===\n\n');

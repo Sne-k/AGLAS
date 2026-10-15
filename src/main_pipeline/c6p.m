@@ -18,8 +18,8 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'structural_model.mat'), 'fem');
-load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof');
+aglas_load(fullfile(paths.data, 'structural_model.mat'), 'fem');
+aglas_load(fullfile(paths.data, 'modal_response.mat'), 'cfg', 't_sol', 'U_dof');
 
 fprintf('=== AGLAS Stage 6: stress and factor of safety ===\n\n');
 
