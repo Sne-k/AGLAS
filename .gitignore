@@ -23,3 +23,11 @@ Thumbs.db
 
 # GNU Octave crash-dump workspace
 octave-workspace
+
+# Simulink model and cache. build_gla_model.m regenerates the model, so it
+# is deliberately not committed (see simulink/README.md).
+simulink/*.slx
+simulink/*.slxc
+
+# Local copy of the pre-repository scratch files
+_pre_repo_backup/

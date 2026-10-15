@@ -101,6 +101,11 @@ function ctrl = lqg_design(cfg, P, weights)
     [~, Lt, info_kf] = care_solve(Aa.', Ca.', W, V);
     L = Lt.';
 
+    % care_solve reports quality but does not act on it. A poor solve here
+    % would otherwise only show up, if at all, as a strange closed loop.
+    check_riccati(info_lqr, 'regulator');
+    check_riccati(info_kf,  'estimator');
+
     ctrl.type     = 'lqg';
     ctrl.K        = K;            % gain on the augmented estimate
     ctrl.L        = L;
@@ -135,4 +140,14 @@ function ctrl = lqg_design(cfg, P, weights)
     % the estimated gust.
     ctrl.K_fb = K(1:ns);
     ctrl.K_ff = K(na);
+end
+
+function check_riccati(info, which)
+    if info.residual > 1e-6 || ~info.stable || ~info.P_posdef
+        error('lqg_design:badRiccati', ...
+              ['The %s Riccati solution is not trustworthy: residual %.2e, ' ...
+               'stable %d, P positive semi-definite %d. Rescale the weights ' ...
+               'or check the plant is stabilisable and detectable.'], ...
+              which, info.residual, info.stable, info.P_posdef);
+    end
 end

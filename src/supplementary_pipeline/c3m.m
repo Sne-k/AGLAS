@@ -17,7 +17,7 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'structural_model.mat'), 'cfg', 'fem', 'modes');
+aglas_load(fullfile(paths.data, 'structural_model.mat'), 'cfg', 'fem', 'modes');
 
 fprintf('=== AGLAS supplementary stage 3: response comparison ===\n\n');
 
@@ -55,9 +55,9 @@ fprintf('  The gust is slow relative to the structure, so the amplification\n');
 fprintf('  factor is close to one, as expected.\n');
 
 % --- Case 3: continuous turbulence -------------------------------------
-T_turb = 30;   % long enough for stable RMS statistics, short enough to run fast
+T_turb = cfg.turb.T_response;
 [wg3, t3] = gust_von_karman(cfg, T_turb, cfg.time.dt_out);
-[tC, qC, UC, giC] = solve_modal_response(cfg, fem, md, t3, wg3, 'kussner', 0.02);
+[tC, qC, UC, giC] = solve_modal_response(cfg, fem, md, t3, wg3, 'kussner', cfg.turb.dt_kussner);
 tipC = UC(:, fem.idx_w(end));
 
 fprintf('\nvon Karman continuous turbulence, %.0f s record\n', T_turb);

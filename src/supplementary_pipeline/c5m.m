@@ -26,7 +26,7 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'stress_field.mat'), 'cfg', 'x', 't_sol', 'stress');
+aglas_load(fullfile(paths.data, 'stress_field.mat'), 'cfg', 'x', 't_sol', 'stress');
 
 fprintf('=== AGLAS supplementary stage 5: strain and safety ===\n\n');
 

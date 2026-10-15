@@ -78,14 +78,17 @@ function modes = modal_analysis(fem, n_keep)
         modes.ph_shape = [];
     end
 
-    % Classify each mode by where its kinetic energy sits.
+    % Classify each mode by where its kinetic energy sits. Deflection and
+    % twist carry different units, so the shapes are weighted by their own
+    % blocks of the mass matrix rather than compared as raw amplitudes.
     modes.type = cell(n_keep, 1);
+    ib = sort([fem.idx_w, fem.idx_th]);
     for i = 1:n_keep
-        e_bend = sum(V(fem.idx_w, i).^2);
         if fem.torsion
-            e_tors = sum(V(fem.idx_ph, i).^2) * (fem.dx^0);
-            % Compare energies scaled by the relevant inertias.
-            e_tors = e_tors * 1.0;
+            vb = V(ib, i);
+            vt = V(fem.idx_ph, i);
+            e_bend = vb.' * fem.M(ib, ib) * vb;
+            e_tors = vt.' * fem.M(fem.idx_ph, fem.idx_ph) * vt;
             if e_tors > e_bend
                 modes.type{i} = 'torsion';
             else

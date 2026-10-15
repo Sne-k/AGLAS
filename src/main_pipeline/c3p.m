@@ -19,7 +19,7 @@ clear; close all; clc;
 addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'common'));
 paths = aglas_paths();
 
-load(fullfile(paths.data, 'structural_model.mat'), 'cfg', 'fem', 'modes');
+aglas_load(fullfile(paths.data, 'structural_model.mat'), 'cfg', 'fem', 'modes');
 
 fprintf('=== AGLAS Stage 3: gust response ===\n\n');
 

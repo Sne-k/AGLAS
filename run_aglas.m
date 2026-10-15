@@ -78,14 +78,33 @@ function run_aglas(which_pipeline, run_tests)
                   which_pipeline);
     end
 
+    % Which earlier stages' outputs each stage reads. If one of these fails in
+    % this run, its .mat file on disk is from a previous run, so the dependent
+    % stage is skipped rather than allowed to produce plausible stale results.
+    deps = struct('c1p', {{}}, 'c2p', {{'c1p'}}, 'c3p', {{'c2p'}}, ...
+                  'c4p', {{'c2p'}}, 'c5p', {{'c3p'}}, 'c6p', {{'c2p','c3p'}}, ...
+                  'c1m', {{}}, 'c2m', {{}}, 'c3m', {{'c2p'}}, ...
+                  'c4m', {{'c2p','c3p'}}, 'c5m', {{'c4m'}}, 'c6m', {{'c5m'}});
+    bad = {};
+
     for i = 1:numel(stages)
         name = stages{i};
         banner(sprintf('Stage %d of %d : %s', i, numel(stages), name));
+        blocked = intersect(deps.(name), bad);
+        if ~isempty(blocked)
+            bad{end+1} = name; %#ok<AGROW>
+            failed{end+1} = sprintf('%s : skipped, depends on failed %s', ...
+                                    name, strjoin(blocked, ', ')); %#ok<AGROW>
+            fprintf('\n[SKIPPED] %s : depends on %s, which did not complete\n', ...
+                    name, strjoin(blocked, ', '));
+            continue;
+        end
         ts = tic;
         try
             run_stage(name);
             fprintf('\n[ok] %s finished in %.1f s\n', name, toc(ts));
         catch err
+            bad{end+1} = name; %#ok<AGROW>
             failed{end+1} = sprintf('%s : %s', name, err.message); %#ok<AGROW>
             fprintf('\n[FAILED] %s : %s\n', name, err.message);
         end
@@ -98,10 +117,12 @@ function run_aglas(which_pipeline, run_tests)
     if isempty(failed)
         fprintf(' All stages completed.\n');
     else
-        fprintf(' %d stage(s) failed:\n', numel(failed));
+        fprintf(' %d stage(s) failed or were skipped:\n', numel(failed));
         for i = 1:numel(failed)
             fprintf('   - %s\n', failed{i});
         end
+        fprintf(['\n Some headline values below may come from an earlier run, ' ...
+                 'not this one.\n']);
     end
     fprintf('\n Data    : %s\n', paths.data);
     fprintf(' Results : %s\n', paths.results);
