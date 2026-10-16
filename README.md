@@ -78,20 +78,31 @@ Baseline wing: 10 m semi-span, 1.5 m chord, aluminium 2024-T3 box spar, under a
 A 25 % chord trailing-edge surface over 6.0 to 9.5 m of the semi-span, with a
 20 degree deflection limit and a 150 deg/s rate limit.
 
-The open-loop baseline in this table is 145.2 kN m rather than the 142.1 kN m
-above. The two are different models and both are correct. The analysis pipeline
-applies the Kussner gust-penetration lag but models the wing in still air; the
-control plant drops the Kussner lag and instead includes quasi-steady
-aerodynamic feedback from the wing's own motion, which is essential for a
-controller to be testable off its design condition. The 2 % difference between
-them is the net of those two choices.
+The open-loop baseline in this table is 145.3 kN m rather than the 142.1 kN m
+above. The analysis pipeline applies the Kussner gust-penetration lag but
+models the wing in still air; the default control plant drops the Kussner lag
+and instead includes quasi-steady aerodynamic feedback from the wing's own
+motion, which is essential for a controller to be testable off its design
+condition. The 2 % difference between them is the net of those two choices.
 
 | Controller | Peak root moment | Reduction | Peak deflection |
 |---|---|---|---|
-| Open loop | 145.2 kN m | — | — |
+| Open loop | 145.3 kN m | — | — |
 | LQG | 68.4 kN m | 52.9 % | 17.9 deg |
-| MRAC augmented | 71.4 kN m | 50.8 % | 17.3 deg |
+| MRAC augmented | 71.8 kN m | 50.6 % | 17.2 deg |
 | Policy search | 58.6 kN m | **59.6 %** | 20.0 deg |
+
+With the unsteady control plant (`cfg.aero.plant_model = 'unsteady'`, see
+below), which carries the Kussner lag as well as the wing's own circulation lag,
+the open-loop peak is 141.2 kN m, within 0.6 % of the analysis pipeline, and
+the ranking is unchanged:
+
+| Controller | Unsteady, incompressible | Unsteady, compressible |
+|---|---|---|
+| Open loop | 141.2 kN m | 142.6 kN m |
+| LQG | 69.4 kN m, 50.8 % | 69.4 kN m, 51.3 % |
+| MRAC augmented | 71.7 kN m, 49.2 % | 71.8 kN m, 49.6 % |
+| Policy search | 59.2 kN m, **58.1 %** | 59.8 kN m, **58.0 %** |
 
 Under sustained von Karman turbulence the LQG cuts the root moment RMS from
 30.0 to 14.1 kN m, a 53 % reduction, consistent with the discrete gust result.
@@ -115,8 +126,15 @@ possible; a bending-only beam cannot flutter at any speed.
 **Aerodynamics.** Strip theory throughout. Gust loads use the Kussner indicial
 function for gust penetration, evaluated by an exact recurrence. Flutter uses
 Theodorsen's `C(k)` from Hankel functions, solved by the p-k method with
-eigenvector-based mode tracking. The control plant uses the quasi-steady limit
-of the same model.
+eigenvector-based mode tracking. The control plant uses the same strip theory
+in the time domain, in one of two forms. The default is the quasi-steady limit,
+C(k) = 1. The unsteady form realises C(k) with a two-state indicial lag (R.T.
+Jones' fit to the Wagner function, or the compressible fit of Leishman and
+Nguyen, AIAA J. 28(5), 1990), adds the apparent-mass terms and the Kussner gust
+lag, and optionally applies Prandtl-Glauert compressibility. Its stability
+boundary reproduces the p-k flutter result to 1 % (312 m/s and 13.21 Hz,
+against 314.8 m/s and 13.15 Hz); with compressibility the boundary falls to
+264 m/s.
 
 One consequence is worth stating because it changes how the wing should be
 thought about: **aerodynamic damping dominates structural damping.** The first
@@ -125,7 +143,7 @@ wing is far better damped in the air than the structural model alone suggests,
 which limits how much any controller can add.
 
 **Control.** An 8-state aeroservoelastic plant, three mass-normalised modes
-plus a second-order actuator. LQG with an observer that estimates the gust as
+plus a second-order actuator, or 18 states with the unsteady aerodynamic lags. LQG with an observer that estimates the gust as
 a state alongside the structure, which is what turns the law from a purely
 reactive loop into one with disturbance feedforward.
 
@@ -141,7 +159,7 @@ src/supplementary_pipeline/
                       c1m..c6m  gust models, mesh convergence, response
                                 comparison, stress field, strain, sizing
 simulink/                       closed-loop model, built by script
-tests/                          verification suite, 90 checks
+tests/                          verification suite, 97 checks
 docs/control-design-log.md      full control design record, including dead ends
 data/                           generated .mat results
 results/                        generated figures
@@ -156,8 +174,9 @@ addpath('tests'); run_all_tests
 The same suite runs on GitHub Actions for every push to `main` and every pull
 request (`.github/workflows/tests.yml`).
 
-90 checks. The 76 physics checks are all against closed-form references rather
-than previously recorded output; the 14 control checks cover the Riccati,
+97 checks. The 76 physics checks are all against closed-form references rather
+than previously recorded output; 7 check the unsteady control plant against
+Theodorsen's `C(k)` and the p-k flutter boundary; the 14 control checks cover the Riccati,
 Lyapunov and controllability routines against closed forms, and pin the
 closed-loop results in the table above so a change to the controller cannot
 silently move them. A suite that only compared against stored numbers would have locked in
@@ -196,10 +215,16 @@ when a result falls outside the range where its assumptions hold.
 - **Linear beam theory.** Deflections assumed small. The code warns above 10 %
   of span; the baseline reaches 6.7 %.
 - **Prismatic, unswept, untapered.** No sweep, taper or spanwise variation.
-- **The control plant is quasi-steady.** It omits the `C(k)` phase lag and so
-  loses stability at about 377 m/s where the unsteady solution puts flutter at
-  314.8 m/s. Use it for design well below that boundary and `flutter_pk` for
-  anything touching the stability margin.
+- **The default control plant is quasi-steady.** It omits the `C(k)` phase lag
+  and loses stability at about 216 m/s, well below the 314.8 m/s flutter speed.
+  Use it for design well below that boundary. The unsteady plant reproduces the
+  p-k boundary to 1 %, but the design-log experiments were measured with the
+  quasi-steady one.
+- **Compressibility is Prandtl-Glauert only.** The unsteady plant's
+  compressible option scales lift slopes and lag rates with
+  `beta = sqrt(1 - M^2)`, a linear subsonic correction that refuses to run
+  above Mach 0.9. Its 264 m/s boundary is Mach 0.78, where transonic effects
+  already matter; the apparent-mass terms stay incompressible.
 
 ## On learned control
 
@@ -210,7 +235,7 @@ loop has hard deflection and rate limits that LQR cannot represent.
 
 Searching directly over four scales on the LQG gain, scored on the real
 objective with saturation included, closes that gap and gives a 14 % further
-reduction. It is not overfitted: tuned on one gust, it still wins by 11 to 21 %
+reduction. It is not overfitted: tuned on one gust, it still wins by 9 to 21 %
 on other gust durations, other amplitudes, continuous turbulence and an
 off-design flight speed.
 
@@ -234,7 +259,7 @@ gusts and sustained turbulence. In every case it matched or underperformed the
 fixed-gain LQG it augments.
 
 The reason is not a tuning failure. Fixed-gain LQG is stable from 35 to
-200 m/s and performs *better* at 80 m/s than at its 50 m/s design point,
+248 m/s and performs *better* at 80 m/s than at its 50 m/s design point,
 because higher dynamic pressure hands it more control authority. There is no
 performance deficit for adaptation to recover. Reporting otherwise would
 require choosing a flight condition outside the usable envelope, or weakening

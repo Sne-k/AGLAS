@@ -74,8 +74,9 @@ function out = policy_search(cfg, P, base, t, wg, opts)
     na = base.n_aug;
 
     % Index blocks of the augmented gain: modal position, modal rate,
-    % actuator states, gust feedforward.
-    blocks = { 1:nm, nm+(1:nm), (2*nm+1):ns, na };
+    % actuator states, gust feedforward. Aerodynamic lag states of the
+    % unsteady plant keep their LQG gain unscaled.
+    blocks = { P.idx.q, P.idx.qdot, [P.idx.delta, P.idx.ddot], na };
 
     K0 = base.K;
 

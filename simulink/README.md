@@ -88,9 +88,9 @@ From the pure-MATLAB reference, which the model should reproduce:
 
 | Case | Peak root moment | Reduction | Peak deflection |
 |---|---|---|---|
-| Open loop | 145.2 kN m | — | 0 deg |
+| Open loop | 145.3 kN m | — | 0 deg |
 | LQG | 68.4 kN m | 52.9 % | 17.9 deg |
-| MRAC, gamma = 0.5 | 71.4 kN m | 50.8 % | 17.3 deg |
+| MRAC, gamma = 0.5 | 71.8 kN m | 50.6 % | 17.2 deg |
 
 MRAC being slightly *worse* than LQG at the design point is correct, not a
 fault. There is no model error to adapt to there, so the adaptive term can only
