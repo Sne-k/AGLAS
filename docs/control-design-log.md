@@ -127,16 +127,16 @@ relative error 0.8 %. That ordering is what a correct implementation must show.
 ## 4. Preliminary tuning
 
 Single knob, `r_command`, the price on commanded deflection. Open-loop peak
-root moment 145.2 kN m.
+root moment 145.3 kN m.
 
 | r_command | Peak moment | Reduction | Peak deflection | Saturated |
 |---|---|---|---|---|
-| 0.001 | 73.4 kN m | 49.5 % | 20.1 deg | 85.5 % |
-| 0.01 | 64.0 kN m | 55.9 % | 20.1 deg | 14.5 % |
+| 0.001 | 72.2 kN m | 50.3 % | 20.1 deg | 85.4 % |
+| 0.01 | 64.2 kN m | 55.8 % | 20.1 deg | 14.5 % |
 | 0.1 | 63.9 kN m | 56.0 % | 20.0 deg | 10.5 % |
 | **0.3** | **68.4 kN m** | **52.9 %** | **17.9 deg** | **0 %** |
 | 1 | 108.1 kN m | 25.6 % | 8.7 deg | 0 % |
-| 10 | 140.3 kN m | 3.4 % | 1.1 deg | 0 % |
+| 10 | 140.4 kN m | 3.4 % | 1.1 deg | 0 % |
 
 **r = 0.3 is the design point**: best reduction available without touching a
 limit. The two cheaper-control rows beat it by about three points, but only by
@@ -171,15 +171,16 @@ the first gust, making the loop **far worse** than the LQG it augmented
 order |phi| ~ 5 and |P_lyap*B| ~ 0.76. Order 5 is the correct scale, three
 orders of magnitude lower.
 
-At the design point, where there is nothing to adapt to, the degradation is a
-clean function of adaptation rate, which is exactly what theory predicts:
+At the design point, where there is nothing to adapt to, any adaptation only
+adds control activity, and the faster it adapts the worse the result, until
+the parameter bound starts to limit the damage:
 
-| gamma | max abs theta | Peak moment | vs LQG |
-|---|---|---|---|
-| 0.05 | 0.0012 | 68.7 kN m | +0.5 % |
-| 0.5 | 0.0101 | 71.4 kN m | +4.5 % |
-| 5 | 0.0273 | 87.8 kN m | +28.4 % |
-| 50 | 0.0478 | 101.0 kN m | +47.8 % |
+| gamma | Peak moment | vs LQG |
+|---|---|---|
+| 0.05 | 68.8 kN m | +0.6 % |
+| 0.5 | 71.8 kN m | +5.0 % |
+| 5 | 135.3 kN m | +97.8 % |
+| 50 | 118.1 kN m | +72.6 % |
 
 ### 5.2 Off-nominal, which is the case adaptation exists for
 
@@ -187,25 +188,25 @@ Controller designed at 50 m/s and nominal mass, then flown elsewhere:
 
 | Condition | Open loop | LQG | MRAC | MRAC benefit |
 |---|---|---|---|---|
-| Nominal 50 m/s | 145.2 | 68.4 | 71.4 | -4.5 % |
-| 35 m/s | 101.2 | 65.2 | 66.0 | -1.1 % |
-| 80 m/s | 236.1 | 60.9 | 70.0 | -15.0 % |
-| Fuel burnt, -11 % mass | 144.7 | 68.3 | 71.7 | -5.0 % |
-| 80 m/s and fuel burnt | 235.4 | 60.8 | 213.8 | -251 % |
+| Nominal 50 m/s | 145.3 | 68.4 | 71.8 | -5.0 % |
+| 35 m/s | 101.2 | 65.3 | 66.2 | -1.5 % |
+| 80 m/s | 236.4 | 61.0 | 178.6 | -193 % |
+| Fuel burnt, -11 % mass | 144.8 | 68.3 | 72.0 | -5.4 % |
+| 80 m/s and fuel burnt | 235.8 | 61.0 | 223.1 | -266 % |
 
 Control effectiveness loss, controller still believing it has full authority:
 
 | Lambda | LQG | MRAC | MRAC benefit |
 |---|---|---|---|
-| 1.00 | 68.4 | 71.5 | -4.5 % |
-| 0.60 | 95.0 | 94.0 | +1.0 % |
+| 1.00 | 68.4 | 71.8 | -5.0 % |
+| 0.60 | 95.0 | 93.9 | +1.1 % |
 | 0.40 | 112.7 | 112.3 | +0.3 % |
-| 0.15 | 132.9 | 132.2 | +0.5 % |
+| 0.15 | 133.0 | 133.1 | -0.0 % |
 
 **MRAC does not help on this aircraft.** Two independent reasons:
 
 1. **There is no performance deficit to recover.** Fixed-gain LQG is stable
-   from 35 to 200 m/s and only loses stability at 240 m/s. At 80 m/s it
+   from 35 to 248 m/s and only loses stability at 250 m/s. At 80 m/s it
    performs *better* than at its design point, 74 % reduction against 53 %,
    because higher dynamic pressure hands it more control authority. The
    uncertainty makes the plant easier to control, not harder.
@@ -231,11 +232,13 @@ bending moment RMS in kN m:
 
 | Lambda | Open loop | LQG | Best MRAC | MRAC benefit |
 |---|---|---|---|---|
-| 1.00 | 30.04 | 14.11 | 17.41 | -23.4 % |
-| 0.40 | 30.04 | 20.67 | 23.64 | -14.4 % |
+| 1.00 | 30.02 | 14.11 | 14.53 | -3.0 % |
+| 0.40 | 30.02 | 20.67 | 21.13 | -2.2 % |
 
-**MRAC is worse here too**, including under a 60 % control effectiveness loss,
-and the best adaptation rate is the smallest one tried in both cases. So the
+Best MRAC is over gamma = 0.05, 0.5 and 5. **MRAC is worse here too**,
+including under a 60 % control effectiveness loss, though by a few percent
+rather than the 14 to 23 % an earlier measurement recorded with a different
+set of adaptation rates. So the
 timescale argument in section 5.2 was not the whole story: giving adaptation
 fifteen times longer does not rescue it.
 
@@ -257,15 +260,20 @@ the discrete gust.
 
 Designed at 50 m/s, applied across the envelope:
 
-| Airspeed | Closed loop | max Re(eig) |
-|---|---|---|
-| 35 to 200 m/s | stable | about -3.6 |
-| 240 m/s | **unstable** | +15.8 |
-| 300 m/s | **unstable** | +47.1 |
+| Airspeed | Closed loop | max Re(eig), closed loop | max Re(eig), open loop |
+|---|---|---|---|
+| 35 m/s | stable | -3.03 | -2.87 |
+| 80 m/s | stable | -1.92 | -4.81 |
+| 200 m/s | stable | -3.63 | -1.63 |
+| 240 m/s | stable | -3.13 | **+3.25** |
+| 250 m/s | **unstable** | > 0 | > 0 |
+| 300 m/s | **unstable** | +24.86 | +13.31 |
 
-The failure boundary sits between 200 and 240 m/s, well above any realistic
-operating speed for this wing and approaching the 314.8 m/s flutter speed where
-the quasi-steady plant is no longer trustworthy anyway.
+The failure boundary sits at 250 m/s, well above any realistic operating speed
+for this wing. Between 216 and 248 m/s the LQG is stabilising a plant that is
+itself unstable, but that plant is quasi-steady and its own boundary at 216 m/s
+is an artefact of the missing circulation lag (section 8), so none of this
+region should be trusted.
 
 ---
 
@@ -292,13 +300,25 @@ the control effectiveness is known.
 
 ## 8. Quasi-steady versus unsteady, a caution
 
-The control plant is quasi-steady and therefore omits the C(k) phase lag that
-drives classical flutter. It loses stability at about **377 m/s** in a 6.5 Hz
-oscillatory mode, whereas the unsteady p-k solution puts flutter at
-**314.8 m/s and 13.1 Hz**. Quasi-steady theory over-predicting flutter speed is
-the expected result, not a discrepancy to reconcile. Use the control plant for
-design well below that boundary and `flutter_pk` for anything touching the
-stability margin itself.
+The default control plant is quasi-steady and therefore omits the C(k) phase
+lag that drives classical flutter. It loses stability at about **216 m/s** in a
+17.7 Hz mode, whereas the unsteady p-k solution puts flutter at **314.8 m/s and
+13.1 Hz**. Use the control plant for design well below that boundary and
+`flutter_pk` for anything touching the stability margin itself.
+
+An earlier version of this section reported the quasi-steady boundary as
+377 m/s and called the over-prediction expected. That number came from a
+defect: the plant's aerodynamic damping was taken as Im Q(k)/k at k = 1e-5,
+but Im C(k) ~ k ln k near zero, so the division left a ln(1e-5) term that made
+the torsion mode about 27 times better damped than C = 1 strip theory gives.
+The quasi-steady plant now uses the exact C = 1 limit. At the 50 m/s design
+point the fix moved the results in sections 4 and 5 by less than 0.5 %; the
+tables above are re-measured with it.
+
+`cfg.aero.plant_model = 'unsteady'` realises C(k) in the time domain with a
+two-state indicial lag, adds apparent mass and the Kussner gust lag, and its
+stability boundary reproduces p-k to 1 %: 312 m/s and 13.21 Hz. With
+Prandtl-Glauert compressibility the boundary falls to 264 m/s, Mach 0.78.
 
 ---
 
@@ -316,8 +336,8 @@ raise no error: a swapped Mux order, a Selector off by one, a sign on a Sum.
 identical inputs and reports the difference.
 
 **Since executed.** With MRAC on at the nominal condition, the model matches
-the `.m` reference to 0.003 % on peak root moment (71.47 kN m in both) and on
-peak command (17.26 deg), 0.007 % RMS over the waveform and 0.008 % worst
+the `.m` reference to 0.003 % on peak root moment (71.81 kN m in both) and on
+peak command (17.21 deg), 0.007 % RMS over the waveform and 0.008 % worst
 pointwise. Rerun `compare_simulink` after any change to the design matrices.
 
 ---
@@ -369,11 +389,11 @@ saturated closed loop, scored on peak root bending moment.
 
 | r_command | LQG | Tuned | Improvement | LQG saturation | Scales |
 |---|---|---|---|---|---|
-| 0.3 | 68.36 | **58.63** | +14.2 % | 0 % | [1.8, 0, 0.95, 1] |
-| 0.03 | 64.27 | 59.16 | +8.0 % | 13.5 % | [0, 0.75, 0, 2.2] |
-| 0.01 | 64.00 | 59.16 | +7.6 % | 14.5 % | [0, 0.2, 0, 1.4] |
+| 0.3 | 68.42 | **58.65** | +14.3 % | 0 % | [1.8, 0, 0.64, 1] |
+| 0.03 | 64.40 | 59.26 | +8.0 % | 13.5 % | [0, 0.79, 0, 2.2] |
+| 0.01 | 64.17 | 59.26 | +7.7 % | 14.5 % | [0, 0.85, 0.14, 1.9] |
 
-Best is 58.63 kN m, a **59.6 %** reduction from the 145.2 kN m open-loop peak,
+Best is 58.65 kN m, a **59.6 %** reduction from the 145.3 kN m open-loop peak,
 against LQG's 52.9 %. Policy search beats LQG at every control weight tried, so
 the gain is not simply a matter of choosing a better `r`.
 
@@ -387,13 +407,15 @@ Tuned on the 2.0 s design gust, then evaluated on disturbances it never saw:
 
 | Validation case | LQG | Tuned | Change |
 |---|---|---|---|
-| Gust duration 1.0 s | 70.16 | 60.72 | +13.4 % |
-| Gust duration 3.0 s | 68.03 | 58.77 | +13.6 % |
-| Gust duration 4.0 s | 67.91 | 58.92 | +13.2 % |
-| Gust amplitude 6 m/s | 41.02 | 34.50 | +15.9 % |
-| Turbulence, peak | 29.53 | 26.30 | +11.0 % |
-| Turbulence, RMS | 12.42 | 10.82 | +12.9 % |
-| 80 m/s, off design | 60.88 | 48.30 | +20.7 % |
+| Gust duration 1.0 s | 70.29 | 60.84 | +13.4 % |
+| Gust duration 3.0 s | 68.07 | 58.77 | +13.7 % |
+| Gust duration 4.0 s | 67.95 | 58.92 | +13.3 % |
+| Gust amplitude 6 m/s | 41.05 | 34.50 | +16.0 % |
+| Turbulence, peak | 35.49 | 32.16 | +9.4 % |
+| Turbulence, RMS | 14.11 | 12.20 | +13.5 % |
+| 80 m/s, off design | 60.99 | 48.33 | +20.8 % |
+
+The turbulence rows use the 30 s, 2.10 m/s RMS record of section 5.3.
 
 It generalises across disturbance shape, amplitude, disturbance *class* and
 flight condition. It even wins on RMS under turbulence, which is closer to the
@@ -405,8 +427,8 @@ The improvement is not free. At the design point:
 
 | | Peak moment | Peak deflection | RMS command | Position saturation |
 |---|---|---|---|---|
-| LQG | 68.36 kN m | 17.93 deg | 5.58 deg | 0 % |
-| Tuned | 58.63 kN m | 20.01 deg | 6.37 deg | 3.9 % |
+| LQG | 68.42 kN m | 17.93 deg | 6.32 deg | 0 % |
+| Tuned | 58.65 kN m | 20.01 deg | 7.22 deg | 3.9 % |
 
 The tuned policy uses **14 % more control effort** and sits right on the
 20 degree deflection limit, where LQG left two degrees unused. Part of the gain

@@ -41,6 +41,24 @@ function cfg = aglas_config(preset)
     cfg.flight.U_inf     = 50;     % reference true airspeed            [m/s]
     cfg.flight.a_sound   = 340.3;  % speed of sound                     [m/s]
 
+    % --- Aerodynamics of the control plant (plant_statespace)
+    % 'quasisteady' is the k -> 0 limit of Theodorsen strip theory: no
+    % circulation lag, no apparent mass, gust applied without Kussner lag.
+    % 'unsteady' adds a two-state indicial lag on every circulatory force
+    % (wing motion, flap and gust) and the apparent-mass terms, so the plant
+    % carries the C(k) phase lag that drives flutter.
+    cfg.aero.plant_model = 'quasisteady';
+    % Indicial lift function for the circulatory lag, as A_i, b_i in
+    % phi(s) = 1 - A_1*exp(-b_1*beta^2*s) - A_2*exp(-b_2*beta^2*s), s in
+    % semi-chords. 'jones' is R.T. Jones' fit to the Wagner function and
+    % reproduces Theodorsen's C(k) to a few percent. 'leishman' is the
+    % compressible fit of Leishman & Nguyen (AIAA J 28(5), 1990).
+    cfg.aero.indicial    = 'jones';
+    % Prandtl-Glauert compressibility in the unsteady plant: lift slope
+    % cl_alpha/beta and lag rates scaled by beta^2, beta = sqrt(1 - M^2).
+    % Linear subsonic theory; not valid approaching M = 1.
+    cfg.aero.compressible = false;
+
     % --- Discrete gust ("1-cosine"), CS-25.341(a) form
     cfg.gust.U_ds        = 10;     % peak gust velocity                 [m/s]
     cfg.gust.t_g         = 2.0;    % gust duration (full 1-cos cycle)   [s]
