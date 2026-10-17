@@ -159,7 +159,7 @@ src/supplementary_pipeline/
                       c1m..c6m  gust models, mesh convergence, response
                                 comparison, stress field, strain, sizing
 simulink/                       closed-loop model, built by script
-tests/                          verification suite, 97 checks
+tests/                          verification suite, 102 checks
 docs/control-design-log.md      full control design record, including dead ends
 data/                           generated .mat results
 results/                        generated figures
@@ -174,12 +174,12 @@ addpath('tests'); run_all_tests
 The same suite runs on GitHub Actions for every push to `main` and every pull
 request (`.github/workflows/tests.yml`).
 
-97 checks. The 76 physics checks are all against closed-form references rather
+102 checks. The 76 physics checks are all against closed-form references rather
 than previously recorded output; 7 check the unsteady control plant against
 Theodorsen's `C(k)` and the p-k flutter boundary; the 14 control checks cover the Riccati,
 Lyapunov and controllability routines against closed forms, and pin the
 closed-loop results in the table above so a change to the controller cannot
-silently move them. A suite that only compared against stored numbers would have locked in
+silently move them; 5 cover the gust feedforward path. A suite that only compared against stored numbers would have locked in
 the defects this code was written to remove.
 
 | Check | Reference | Agreement |
@@ -249,21 +249,49 @@ model.
 
 ## On the "adaptive" in AGLAS
 
-The project is named for an adaptive system, so the finding that matters most
-is this one: **on this aircraft, adaptation does not earn its complexity.**
+The project is named for an adaptive system, and the answer turns out to depend
+on where the adaptation sits.
 
-MRAC is fully implemented, as a Lyapunov-based augmentation of the LQG with
-normalisation, sigma-modification and a parameter bound. It was evaluated
-against speed variation, mass variation, control effectiveness loss, discrete
-gusts and sustained turbulence. In every case it matched or underperformed the
-fixed-gain LQG it augments.
+**Adaptive feedback (MRAC) does not earn its complexity.** MRAC is fully
+implemented, as a Lyapunov-based augmentation of the LQG with normalisation,
+sigma-modification and a parameter bound. It was evaluated against speed
+variation, mass variation, control effectiveness loss, discrete gusts and
+sustained turbulence. In every case it matched or underperformed the fixed-gain
+LQG it augments. That is not a tuning failure: fixed-gain LQG is stable from
+35 to 248 m/s and performs *better* at 80 m/s than at its 50 m/s design point,
+because higher dynamic pressure hands it more control authority.
 
-The reason is not a tuning failure. Fixed-gain LQG is stable from 35 to
-248 m/s and performs *better* at 80 m/s than at its 50 m/s design point,
-because higher dynamic pressure hands it more control authority. There is no
-performance deficit for adaptation to recover. Reporting otherwise would
-require choosing a flight condition outside the usable envelope, or weakening
-the baseline being compared against.
+**Adaptive feedforward from a gust probe does, off the design point.** Following
+Wildschek et al. (AIAA 2006-6054) and Zeng et al. (JGCD 2010), a probe 10 m
+ahead of the wing feeds an FIR filter that adapts online by filtered-x LMS
+(`feedforward_design`, `ctrl.ff` in `closed_loop_sim`). In 240 s of
+von Karman turbulence with a 10 m/s gust arriving at 232 s, adaptation running:
+
+| Condition | Controller | Turbulence RMS | Gust peak | Saturation |
+|---|---|---|---|---|
+| 50 m/s | LQG, r = 0.3 | 20.55 kN m | 62.9 kN m | 0.0 % |
+| 50 m/s | LQG, r = 0.01 (fixed, aggressive) | -60 % | 52.0 kN m | 6.8 % |
+| 50 m/s | LQG + adaptive feedforward | -57 % | 52.3 kN m | 6.3 % |
+| 80 m/s | LQG, r = 0.3 | 19.12 kN m | 59.8 kN m | 0.1 % |
+| 80 m/s | LQG, r = 0.01 (fixed, aggressive) | -70 % | 16.7 kN m | 29.9 % |
+| 80 m/s | LQG + fixed feedforward, scheduled on q | -49 % | 39.6 kN m | 1.4 % |
+| 80 m/s | LQG + adaptive feedforward | **-85 %** | **7.4 kN m** | 0.9 % |
+
+At the design point adaptation only matches a more aggressively tuned fixed
+LQG. At 80 m/s it beats every fixed alternative tried, including a feedforward
+filter redesigned for that speed, while barely touching the deflection stop.
+Both ingredients are needed: with the probe moved to the wing it falls to
+-71 %, and with a constant reference in place of the probe to -59 %. Under
+60 % control effectiveness loss nothing helps, since every option is
+saturation-bound. The result holds with sensor noise (up to 5 times the
+estimator's design levels) and with 0.5 m/s RMS of probe noise.
+
+Two cautions. First, the mechanism is not a better-learned filter: with
+leakage the weights end near zero, and the normalised LMS step behaves as a
+high-gain, error-driven correction on root strain. Its stability is shown only
+by simulation, not proved. Second, the simulation has a perfect plant apart
+from the off-design changes, no sensor delay, and an ideal probe position; any
+of those could erode the margin.
 
 `docs/control-design-log.md` has the full evidence, every measurement and every
 dead end.

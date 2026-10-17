@@ -104,6 +104,12 @@ function cfg = aglas_config(preset)
     % Sensors used by the estimator.
     cfg.sensor.strain_noise     = 2e-6;  % root strain noise, RMS       [-]
     cfg.sensor.accel_noise      = 0.02;  % tip accelerometer noise, RMS [m/s^2]
+    % Add that noise to the measurements in closed_loop_sim, white and
+    % independent each integration step at the RMS levels above. Off by
+    % default so every documented result stays reproducible as measured.
+    cfg.sensor.simulate_noise   = false;
+    cfg.sensor.probe_noise      = 0.1;   % gust probe noise, RMS        [m/s]
+    cfg.sensor.noise_seed       = 7;
     % Process noise intensity on the gust state. This sets the estimator
     % bandwidth: too high and the filter tries to differentiate its sensors,
     % producing an observer far faster than the structure and impossible to
