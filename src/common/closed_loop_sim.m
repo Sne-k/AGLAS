@@ -94,11 +94,45 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
     n_sat_pos  = 0;
     n_sat_rate = 0;
     u_prev = 0;
+
+    % Measurement noise, held across each step so the estimator's RK4 stages
+    % see the same sample. Generated from its own stream so it does not
+    % disturb any other use of the global generator.
+    use_noise = isfield(cfg, 'sensor') && isfield(cfg.sensor, 'simulate_noise') ...
+                && cfg.sensor.simulate_noise;
+    if use_noise
+        rs = RandStream('mt19937ar', 'Seed', cfg.sensor.noise_seed);
+        noise = [cfg.sensor.strain_noise; cfg.sensor.accel_noise] .* randn(rs, 2, n);
+        probe_noise = cfg.sensor.probe_noise * randn(rs, 1, n);
+    else
+        noise = zeros(2, n);
+        probe_noise = zeros(1, n);
+    end
     bound  = 1e6;
 
     % PID state
     e_int = 0;
     e_prev = 0;
+
+    % Feedforward from a gust reference measured ahead of the wing, see
+    % FEEDFORWARD_DESIGN. Sampled every ff.Ts and held, added to the feedback
+    % command ahead of the actuator limits so it cannot bypass them.
+    has_ff = isfield(ctrl, 'ff') && ~isempty(ctrl.ff);
+    if has_ff
+        ff    = ctrl.ff;
+        nsub  = round(ff.Ts/dt);
+        if abs(nsub*dt - ff.Ts) > 1e-9
+            error('closed_loop_sim:ffRate', ...
+                  'Feedforward period %.4g s is not a multiple of dt = %.4g s.', ff.Ts, dt);
+        end
+        tau   = ff.probe_ahead / cfg.flight.U_inf;
+        w_ff  = ff.w(:);
+        rbuf  = zeros(numel(w_ff), 1);
+        rhist = zeros(numel(ff.S), 1);
+        rfbuf = zeros(numel(w_ff), 1);
+        u_ff  = 0;
+        uff   = zeros(1, n);
+    end
 
     for k = 1:n-1
         xk  = x(:,k);
@@ -106,7 +140,7 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         wk  = wg(k);
 
         % ---- measurement (used by output-feedback laws) -------------------
-        yk = P.C*xk + P.D*u_prev + P.Dw*wk;
+        yk = P.C*xk + P.D*u_prev + P.Dw*wk + noise(:,k);
 
         % ---- control law ---------------------------------------------------
         switch lower(ctrl.type)
@@ -133,6 +167,28 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
             otherwise
                 error('closed_loop_sim:unknownType', ...
                       'Unknown controller type "%s".', ctrl.type);
+        end
+
+        % ---- feedforward, normalised filtered-x LMS when adapting ----------
+        % The reference is the gust the probe sees now, which reaches the wing
+        % tau later. It is passed through the secondary-path model S (command
+        % to root strain, including the feedback loop) to form the filtered
+        % reference the gradient needs. The error is the measured root strain.
+        if has_ff
+            if mod(k-1, nsub) == 0
+                r     = interp_w(t, wg, t(k) + tau) + probe_noise(k);
+                rbuf  = [r; rbuf(1:end-1)];
+                rhist = [r; rhist(1:end-1)];
+                rfbuf = [ff.S(:).' * rhist; rfbuf(1:end-1)];
+                if ff.adapt
+                    e    = yk(ff.err_row);
+                    w_ff = (1 - ff.leak) * w_ff ...
+                           - ff.mu * e * rfbuf / (ff.eps + rfbuf.'*rfbuf);
+                end
+                u_ff = w_ff.' * rbuf;
+            end
+            uff(k) = u_ff;
+            uc = uc + u_ff;
         end
 
         % ---- actuator command limits ---------------------------------------
@@ -214,8 +270,8 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         % ---- RK4 on the estimator (it does not know the gust) ---------------
         if strcmpi(ctrl.type, 'lqg') || is_mrac
             g = @(xx, yy) ctrl.Ae*xx + ctrl.Be*uc + ctrl.L*(yy - ctrl.Ce*xx - ctrl.De*uc);
-            y_mid = P.C*(xk + dt/2*k1) + P.D*uc + P.Dw*wk2;
-            y_end = P.C*x(:,k+1)       + P.D*uc + P.Dw*wk3;
+            y_mid = P.C*(xk + dt/2*k1) + P.D*uc + P.Dw*wk2 + noise(:,k);
+            y_end = P.C*x(:,k+1)       + P.D*uc + P.Dw*wk3 + noise(:,k);
             m1 = g(xhk,            yk);
             m2 = g(xhk + dt/2*m1,  y_mid);
             m3 = g(xhk + dt/2*m2,  y_mid);
@@ -254,6 +310,12 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
     out.peak.delta_deg   = rad2deg(max(abs(out.delta)));
     out.peak.rate_deg_s  = rad2deg(max(abs(out.delta_rate)));
     out.peak.cmd_deg     = rad2deg(max(abs(out.delta_cmd)));
+
+    if has_ff
+        out.ff.w   = w_ff;
+        out.ff.u   = uff;
+        out.ff.tau = tau;
+    end
 
     out.saturated.position = n_sat_pos  / max(1, n-1);
     out.saturated.rate     = n_sat_rate / max(1, n-1);

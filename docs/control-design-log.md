@@ -352,6 +352,7 @@ pointwise. Rerun `compare_simulink` after any change to the design matrices.
 | MRAC | Implemented and evaluated. Does not help on this aircraft; section 5. |
 | Simulink model | Built and verified against the `.m` reference to 0.003 %; section 9. |
 | Reinforcement learning | Done as direct policy search; section 11. |
+| Adaptive feedforward | Implemented and evaluated; helps off-design with gust preview; section 12. |
 
 ---
 
@@ -444,3 +445,90 @@ Policy search optimises the real objective under the real constraint and finds
 the boundary directly. The cost is that the tuned design operates with no
 deflection margin, which is a trade a designer should make deliberately rather
 than inherit.
+
+---
+
+## 12. Adaptive feedforward from a gust probe
+
+Section 5 tested adaptation in the feedback path and found nothing to gain. The
+gust load alleviation literature puts it somewhere else: Wildschek et al.
+(AIAA 2006-6054), Zeng et al. (JGCD 33(3), 2010) and Wang, Li and Da Ronch
+(AIAA 2015-2243) adapt a *feedforward* filter driven by a gust measurement taken
+ahead of the wing. That is the case tested here.
+
+### 12.1 Set-up
+
+A probe 10 m ahead of the wing gives 0.2 s of warning at 50 m/s and 0.125 s at
+80 m/s. An FIR filter of 100 taps at 200 Hz maps the probe history to a surface
+command added to the LQG command ahead of the actuator limits. The filter is
+either fixed, at the Wiener solution trained on a separate 120 s turbulence
+record at 50 m/s, or adapted online by normalised filtered-x LMS
+(mu = 0.003, optionally leakage 1e-4 per update) on measured root strain. The
+secondary-path model is always the nominal 50 m/s closed loop, never updated.
+
+Each case is 240 s of von Karman turbulence, a different realisation from the
+training record, with a 10 m/s, 2 s one-minus-cosine gust arriving at 232 s.
+RMS is taken over 120 to 232 s, after adaptation has had two minutes, and the
+gust peak over the 6 s from 232 s with adaptation still running.
+
+### 12.2 Results
+
+| Condition | Controller | Turbulence RMS | vs LQG | Gust peak | Saturation |
+|---|---|---|---|---|---|
+| 50 m/s | LQG | 20.55 kN m | | 62.9 kN m | 0.0 % |
+| 50 m/s | LQG + fixed FF | 11.17 kN m | -46 % | 49.5 kN m | 20.7 % |
+| 50 m/s | LQG + adaptive FF | 9.79 kN m | -52 % | 52.0 kN m | 7.1 % |
+| 50 m/s | LQG + adaptive FF, leak | 8.81 kN m | -57 % | 52.3 kN m | 6.3 % |
+| 80 m/s | LQG | 19.12 kN m | | 59.8 kN m | 0.1 % |
+| 80 m/s | LQG + fixed FF | 14.55 kN m | -24 % | 46.0 kN m | 18.2 % |
+| 80 m/s | LQG + fixed FF, q-scheduled | 9.83 kN m | -49 % | 39.6 kN m | 1.4 % |
+| 80 m/s | LQG + FF redesigned at 80 m/s | 8.88 kN m | -54 % | 27.4 kN m | 16.5 % |
+| 80 m/s | LQG + adaptive FF | 6.86 kN m | -64 % | 23.8 kN m | 1.4 % |
+| 80 m/s | LQG + adaptive FF, leak | 2.81 kN m | **-85 %** | **7.4 kN m** | 0.9 % |
+| Effectiveness 0.4 | LQG | 30.42 kN m | | 99.1 kN m | 1.9 % |
+| Effectiveness 0.4 | best feedforward option | 24.45 kN m | -20 % | 103.2 kN m | 47.2 % |
+
+### 12.3 Is it the adaptation?
+
+Three alternative explanations were tested and ruled out as the whole story.
+
+1. **The baseline is merely conservative.** r = 0.3 was chosen to keep the
+   discrete gust off the stops, not for turbulence. A fixed LQG at r = 0.01
+   gives -60 % at 50 m/s, which matches adaptation there, so at the design
+   point adaptation adds nothing. At 80 m/s the same LQG gives -70 % with 30 %
+   saturation, against -85 % with 0.9 % for adaptation.
+2. **The fixed filter just has the wrong gain off-design.** Mostly true:
+   scaling the nominal filter by 0.5 at 80 m/s reproduces the redesigned
+   filter exactly (8.18 kN m on the shorter record), and scheduling it on
+   dynamic pressure gives -49 %. Adaptation still beats both.
+3. **It is feedback in disguise, not feedforward.** Partly true. With leakage
+   the weights end near zero (|w| = 0.007 against 0.57 for the Wiener filter),
+   so the benefit does not come from a converged filter: each normalised LMS
+   step moves the command by roughly mu*e/|S|, a high-gain, error-driven
+   correction on root strain. But the probe matters. Moving it to the wing
+   gives -71 % at 80 m/s, and replacing it with a constant reference gives
+   -59 %.
+
+### 12.4 Sensor noise
+
+With `cfg.sensor.simulate_noise`, white noise at the estimator's design levels
+(2e-6 strain, 0.02 m/s^2 acceleration) on the measurements, and at five times
+those levels, every 80 m/s result above holds to within 0.1 kN m. Root strain
+at these loads is about 3e-4, so even 5 times the design noise is a few percent
+of the signal. With probe noise of 0.5 m/s RMS the adaptive result stays at
+-85 % (gust peak 6.0 kN m) while the q-scheduled fixed filter degrades from
+-49 % to -40 %.
+
+### 12.5 What this does and does not show
+
+It shows that, in this simulation, adaptation earns its place off the design
+point when it sits in a feedforward path with gust preview, and that the
+advantage survives realistic sensor and probe noise. It overturns the
+unqualified version of section 5's conclusion; section 5 stands for MRAC.
+
+It does not show that the adaptive loop is stable in general. Stability rests
+on simulation over the cases tried. The plant is perfect apart from the
+off-design changes, there is no sensor or computation delay, and the probe
+sees exactly the gust that later reaches the wing. A delay, unmodelled
+structural modes or a gust that changes between probe and wing are the obvious
+next tests, and any of them could erode the margin.
