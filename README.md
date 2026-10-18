@@ -159,7 +159,7 @@ src/supplementary_pipeline/
                       c1m..c6m  gust models, mesh convergence, response
                                 comparison, stress field, strain, sizing
 simulink/                       closed-loop model, built by script
-tests/                          verification suite, 102 checks
+tests/                          verification suite, 104 checks
 docs/control-design-log.md      full control design record, including dead ends
 data/                           generated .mat results
 results/                        generated figures
@@ -174,12 +174,12 @@ addpath('tests'); run_all_tests
 The same suite runs on GitHub Actions for every push to `main` and every pull
 request (`.github/workflows/tests.yml`).
 
-102 checks. The 76 physics checks are all against closed-form references rather
+104 checks. The 76 physics checks are all against closed-form references rather
 than previously recorded output; 7 check the unsteady control plant against
 Theodorsen's `C(k)` and the p-k flutter boundary; the 14 control checks cover the Riccati,
 Lyapunov and controllability routines against closed forms, and pin the
 closed-loop results in the table above so a change to the controller cannot
-silently move them; 5 cover the gust feedforward path. A suite that only compared against stored numbers would have locked in
+silently move them; 7 cover the gust feedforward path. A suite that only compared against stored numbers would have locked in
 the defects this code was written to remove.
 
 | Check | Reference | Agreement |
@@ -278,7 +278,8 @@ von Karman turbulence with a 10 m/s gust arriving at 232 s, adaptation running:
 | 80 m/s | LQG + adaptive feedforward | **-85 %** | **7.4 kN m** | 0.9 % |
 
 At the design point adaptation only matches a more aggressively tuned fixed
-LQG. At 80 m/s it beats every fixed alternative tried, including a feedforward
+LQG, and only with zero latency: with a 5 ms command delay that LQG is 32 %
+*worse* than the baseline, while adaptive feedforward holds -58 % up to 40 ms. At 80 m/s it beats every fixed alternative tried, including a feedforward
 filter redesigned for that speed, while barely touching the deflection stop.
 Both ingredients are needed: with the probe moved to the wing it falls to
 -71 %, and with a constant reference in place of the probe to -59 %. Under
@@ -286,12 +287,17 @@ Both ingredients are needed: with the probe moved to the wing it falls to
 saturation-bound. The result holds with sensor noise (up to 5 times the
 estimator's design levels) and with 0.5 m/s RMS of probe noise.
 
-Two cautions. First, the mechanism is not a better-learned filter: with
+It is tested against three model errors (design log section 12.5). Command
+delay barely touches it (-83 % at 80 m/s with 20 ms). Structural modes the
+controller does not model cost some margin (-76 % with an 8-mode wing against a
+3-mode design). Loss of coherence between the gust the probe sees and the gust
+that reaches the wing is the real weakness: at a coherence of 0.9 it falls to
+-69 %, and its discrete-gust advantage disappears.
+
+Two cautions remain. The mechanism is not a better-learned filter: with
 leakage the weights end near zero, and the normalised LMS step behaves as a
 high-gain, error-driven correction on root strain. Its stability is shown only
-by simulation, not proved. Second, the simulation has a perfect plant apart
-from the off-design changes, no sensor delay, and an ideal probe position; any
-of those could erode the margin.
+by simulation over the cases tried, not proved.
 
 `docs/control-design-log.md` has the full evidence, every measurement and every
 dead end.

@@ -22,6 +22,24 @@ r_0 = closed_loop_sim(cfg, P, c,    tg, wg);
 state = aglas_assert(state, 'zero feedforward leaves the LQG response unchanged', ...
     isequal(r_l.moment, r_0.moment), '');
 
+% An explicit probe signal equal to what the built-in probe sees must
+% reproduce it exactly.
+ffw0 = ff0; ffw0.w = 1e-3 * ones(size(ff0.w));
+tau  = ffw0.probe_ahead / cfg.flight.U_inf;
+fr   = ffw0; fr.ref = interp1(tg, wg, tg + tau, 'linear', wg(end)).';
+ca = base; ca.ff = ffw0;  cb = base; cb.ff = fr;
+ra = closed_loop_sim(cfg, P, ca, tg, wg);
+rb = closed_loop_sim(cfg, P, cb, tg, wg);
+state = aglas_assert(state, 'explicit probe signal reproduces the built-in probe', ...
+    max(abs(ra.moment - rb.moment)) < 1e-9*max(abs(ra.moment)), '');
+
+% A command delay must reach the plant exactly nd steps late.
+cd_ = cfg; cd_.control.delay = 0.010;
+rd  = closed_loop_sim(cd_, P, base, tg, wg);
+nd  = round(cd_.control.delay / (tg(2) - tg(1)));
+state = aglas_assert(state, 'command delay reaches the plant exactly that late', ...
+    isequal(rd.u_applied(nd+1:end-1), rd.delta_cmd(1:end-nd-1)), sprintf('%d steps', nd));
+
 % The secondary-path model must predict the strain a feedforward command
 % produces. Check its static gain against the closed-loop steady state.
 K = base.K; L = base.L; G = base.Be - L*base.De + L*P.D;

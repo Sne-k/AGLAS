@@ -519,16 +519,55 @@ of the signal. With probe noise of 0.5 m/s RMS the adaptive result stays at
 -85 % (gust peak 6.0 kN m) while the q-scheduled fixed filter degrades from
 -49 % to -40 %.
 
-### 12.5 What this does and does not show
+### 12.5 Robustness to delay, unmodelled modes and gust coherence
+
+Same set-up as 12.1, on a 180 s record (adaptation over 0 to 90 s, RMS over 90
+to 172 s, gust at 172 s). `cfg.control.delay` delays the command reaching the
+plant while the estimator assumes it acted at once. Unmodelled modes are
+simulated by running a 6- or 8-mode wing against the 3-mode design. Coherence
+a mixes the probe signal as a*w + sqrt(1-a^2)*w', with w' an independent
+turbulence realisation, supplied through `ff.ref`.
+
+Turbulence RMS against the r = 0.3 LQG, and the gust peak:
+
+| Case | 50 m/s LQG r=0.01 | 50 m/s adaptive FF | 80 m/s LQG r=0.01 | 80 m/s q-scheduled FF | 80 m/s adaptive FF |
+|---|---|---|---|---|---|
+| Nominal | -61 % | -58 % | -71 %, 16.5 kN m | -49 %, 36.6 kN m | **-86 %, 6.0 kN m** |
+| Delay 5 ms | **+32 %** | -58 % | -66 % | -48 % | -84 % |
+| Delay 10 ms | +72 % | -58 % | -17 %, 53.1 kN m | -47 % | -83 %, 8.1 kN m |
+| Delay 20 ms | +127 % | -57 % | +228 % | -44 % | -83 %, 8.2 kN m |
+| Delay 40 ms | +205 % | -57 % | +378 % | -34 % | -65 %, 19.2 kN m |
+| 6-mode wing | -57 % | -54 % | -63 % | -47 % | -77 %, 10.9 kN m |
+| 8-mode wing | -56 % | -53 % | -62 % | -47 % | -76 %, 12.9 kN m |
+| Coherence 0.9 | | -51 % | | -39 %, 29.9 kN m | -69 %, 32.5 kN m |
+| Coherence 0.7 | | -28 % | | -24 %, 28.5 kN m | -41 %, 40.4 kN m |
+| Coherence 0.5 | | -26 % | | -11 %, 30.4 kN m | -17 %, 34.6 kN m |
+
+The r = 0.3 LQG and the q-scheduled filter move by a few percent at most under
+delay; the aggressive LQG that matched adaptation at the design point is the
+one that cannot tolerate it, and becomes worse than the baseline at 5 ms.
+
+**Delay** therefore strengthens the case for adaptive feedforward: with any
+realistic latency it beats every fixed alternative at both speeds.
+**Unmodelled modes** cost it about ten points at 80 m/s without changing the
+ranking. **Coherence** is the real limit. It still has the lowest turbulence
+RMS of the probe-based options at every coherence tried, but below 1 its
+discrete-gust peak is no better than the fixed filter's, and a zero-delay
+aggressive LQG beats it.
+
+The coherence model is pessimistic for a 10 m probe: it removes correlation
+uniformly across all frequencies, whereas over that distance the gust field
+decorrelates mainly at high frequency and mainly across the span. A
+frequency-dependent spanwise coherence model would be the next refinement.
+
+### 12.6 What this does and does not show
 
 It shows that, in this simulation, adaptation earns its place off the design
 point when it sits in a feedforward path with gust preview, and that the
 advantage survives realistic sensor and probe noise. It overturns the
 unqualified version of section 5's conclusion; section 5 stands for MRAC.
 
-It does not show that the adaptive loop is stable in general. Stability rests
-on simulation over the cases tried. The plant is perfect apart from the
-off-design changes, there is no sensor or computation delay, and the probe
-sees exactly the gust that later reaches the wing. A delay, unmodelled
-structural modes or a gust that changes between probe and wing are the obvious
-next tests, and any of them could erode the margin.
+It does not show that the adaptive loop is stable in general: stability rests
+on simulation over the cases tried, including those in 12.5. Of the model
+errors tested, imperfect probe-to-wing coherence is the one that erodes the
+margin.

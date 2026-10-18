@@ -95,6 +95,18 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
     n_sat_rate = 0;
     u_prev = 0;
 
+    % Transport delay between the command and the surface, as a computation
+    % or sensor latency would produce. The plant receives the command nd
+    % steps late; the estimator still assumes it acted at once, which is the
+    % model error a real delay introduces.
+    nd = 0;
+    if isfield(cfg.control, 'delay') && cfg.control.delay > 0
+        nd = round(cfg.control.delay / dt);
+    end
+    ubuf  = zeros(max(nd, 1), 1);
+    ua    = 0;
+    u_app = zeros(1, n);
+
     % Measurement noise, held across each step so the estimator's RK4 stages
     % see the same sample. Generated from its own stream so it does not
     % disturb any other use of the global generator.
@@ -140,7 +152,7 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         wk  = wg(k);
 
         % ---- measurement (used by output-feedback laws) -------------------
-        yk = P.C*xk + P.D*u_prev + P.Dw*wk + noise(:,k);
+        yk = P.C*xk + P.D*ua + P.Dw*wk + noise(:,k);
 
         % ---- control law ---------------------------------------------------
         switch lower(ctrl.type)
@@ -176,7 +188,11 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         % reference the gradient needs. The error is the measured root strain.
         if has_ff
             if mod(k-1, nsub) == 0
-                r     = interp_w(t, wg, t(k) + tau) + probe_noise(k);
+                if isfield(ff, 'ref') && ~isempty(ff.ref)
+                    r = ff.ref(k) + probe_noise(k);
+                else
+                    r = interp_w(t, wg, t(k) + tau) + probe_noise(k);
+                end
                 rbuf  = [r; rbuf(1:end-1)];
                 rhist = [r; rhist(1:end-1)];
                 rfbuf = [ff.S(:).' * rhist; rfbuf(1:end-1)];
@@ -216,11 +232,18 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         end
         u(k) = uc;
         u_prev = uc;
+        if nd > 0
+            ua   = ubuf(end);
+            ubuf = [uc; ubuf(1:end-1)];
+        else
+            ua = uc;
+        end
+        u_app(k) = ua;
 
         % ---- RK4 on the plant ----------------------------------------------
         wk2 = interp_w(t, wg, t(k) + dt/2);
         wk3 = wg(k+1);
-        f = @(xx, ww) P.A*xx + P.B*uc + P.Bw*ww;
+        f = @(xx, ww) P.A*xx + P.B*ua + P.Bw*ww;
         k1 = f(xk,             wk);
         k2 = f(xk + dt/2*k1,   wk2);
         k3 = f(xk + dt/2*k2,   wk2);
@@ -270,8 +293,8 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         % ---- RK4 on the estimator (it does not know the gust) ---------------
         if strcmpi(ctrl.type, 'lqg') || is_mrac
             g = @(xx, yy) ctrl.Ae*xx + ctrl.Be*uc + ctrl.L*(yy - ctrl.Ce*xx - ctrl.De*uc);
-            y_mid = P.C*(xk + dt/2*k1) + P.D*uc + P.Dw*wk2 + noise(:,k);
-            y_end = P.C*x(:,k+1)       + P.D*uc + P.Dw*wk3 + noise(:,k);
+            y_mid = P.C*(xk + dt/2*k1) + P.D*ua + P.Dw*wk2 + noise(:,k);
+            y_end = P.C*x(:,k+1)       + P.D*ua + P.Dw*wk3 + noise(:,k);
             m1 = g(xhk,            yk);
             m2 = g(xhk + dt/2*m1,  y_mid);
             m3 = g(xhk + dt/2*m2,  y_mid);
@@ -286,10 +309,11 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
         end
     end
     u(n) = u(n-1);
+    u_app(n) = u_app(n-1);
 
     % ------------------------------------------------------------- outputs
     z      = P.Cz * x;
-    meas   = P.C  * x + P.D * u + P.Dw * wg;
+    meas   = P.C  * x + P.D * u_app + P.Dw * wg;
 
     out.t          = t;
     out.x          = x;
@@ -297,6 +321,7 @@ function out = closed_loop_sim(cfg, P, ctrl, t, wg)
     out.xm         = xm;
     out.theta      = theta;
     out.delta_cmd  = u;
+    out.u_applied  = u_app;
     out.delta      = x(P.idx.delta, :);
     out.delta_rate = x(P.idx.ddot,  :);
     out.moment     = z(1,:);
