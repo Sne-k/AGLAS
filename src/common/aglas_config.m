@@ -100,6 +100,7 @@ function cfg = aglas_config(preset)
     cfg.control.rate_max        = 150;   % rate limit                   [deg/s]
     cfg.control.act_freq_hz     = 15;    % actuator natural frequency   [Hz]
     cfg.control.act_zeta        = 0.70;  % actuator damping ratio       [-]
+    cfg.control.delay           = 0;     % command-to-surface latency   [s]
 
     % Sensors used by the estimator.
     cfg.sensor.strain_noise     = 2e-6;  % root strain noise, RMS       [-]
