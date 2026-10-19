@@ -353,6 +353,7 @@ pointwise. Rerun `compare_simulink` after any change to the design matrices.
 | Simulink model | Built and verified against the `.m` reference to 0.003 %; section 9. |
 | Reinforcement learning | Done as direct policy search; section 11. |
 | Adaptive feedforward | Implemented and evaluated; helps off-design with gust preview; section 12. |
+| Lidar preview | Swept 0 to 200 m; about 0.1 s of warning suffices on this wing; section 13. |
 
 ---
 
@@ -571,3 +572,79 @@ It does not show that the adaptive loop is stable in general: stability rests
 on simulation over the cases tried, including those in 12.5. Of the model
 errors tested, imperfect probe-to-wing coherence is the one that erodes the
 margin.
+
+---
+
+## 13. How much gust preview is worth: a lidar look-ahead sweep
+
+Khalil and Fezans (AIAA 2019-0822) and Fezans et al. (CEAS Aeronaut. J., 2019)
+design load alleviation around a Doppler lidar measuring the gust 30 to 200 m
+ahead. Section 12 used a 10 m probe. This section sweeps the look-ahead
+distance to see how much further preview is worth on this wing.
+
+### 13.1 Set-up
+
+As in 12.5: 180 s of turbulence with a gust at 172 s, LQG at r = 0.3, fixed
+(Wiener) and adaptive feedforward, the FIR filter sized to span the preview
+plus 0.5 s (up to 900 taps). `probe_signal` produces the measurement: the gust
+advanced by d/U, mixed frequency by frequency with an independent field
+through the coherence gamma(f) = exp(-C*f*d/U). C = 0 is Taylor's frozen
+turbulence; C = 1 and 4 let the gust evolve between sensor and wing. At 80 m/s
+the fixed filter is trained at 80 m/s; an earlier run trained it at 50 m/s,
+which put its timing wrong by d*(1/50 - 1/80), 1.5 s at 200 m, and is not
+reported.
+
+### 13.2 Results
+
+Turbulence RMS against LQG (20.93 kN m at 50 m/s, 19.46 kN m at 80 m/s):
+
+| Look-ahead | 0 m | 10 m | 25 m | 50 m | 100 m | 200 m |
+|---|---|---|---|---|---|---|
+| Preview at 50 m/s | 0 | 0.20 s | 0.50 s | 1.0 s | 2.0 s | 4.0 s |
+| 50 m/s fixed, C = 0 | -22 % | -47 % | -47 % | -47 % | -46 % | -46 % |
+| 50 m/s adaptive, C = 0 | -55 % | -57 % | -57 % | -56 % | -55 % | -53 % |
+| 50 m/s fixed, C = 1 | -22 % | -42 % | -39 % | -36 % | -31 % | -25 % |
+| 50 m/s adaptive, C = 1 | -55 % | -54 % | -51 % | -49 % | -43 % | -43 % |
+| 50 m/s fixed, C = 4 | -22 % | -37 % | -30 % | -25 % | -19 % | -14 % |
+| 50 m/s adaptive, C = 4 | -55 % | -49 % | -40 % | -37 % | -39 % | -36 % |
+| 80 m/s fixed, C = 0 | -12 % | -55 % | -56 % | -55 % | -54 % | -54 % |
+| 80 m/s adaptive, C = 0 | -73 % | **-85 %** | -80 % | -74 % | -77 % | -70 % |
+| 80 m/s fixed, C = 1 | -12 % | -52 % | -46 % | -40 % | -35 % | -29 % |
+| 80 m/s adaptive, C = 1 | -73 % | -77 % | -69 % | -61 % | -60 % | -44 % |
+| 80 m/s adaptive, C = 4 | -73 % | -68 % | -56 % | -12 % | -6 % | -51 % |
+
+The adaptive gust peak at 80 m/s and C = 0 rises from 6.9 kN m at 10 m to
+21.9 kN m at 200 m. At C = 4 the adaptive filter becomes erratic at 50 and
+100 m, spending over 20 % of the time on the stop.
+
+**Even with a perfect, frozen-turbulence measurement, preview beyond about
+10 m buys nothing**, and as soon as the gust evolves in transit every further
+metre costs performance. The longer filters the adaptive scheme needs also
+learn worse. On this wing the best sensor is the closest one that still gives
+about 0.1 s of warning.
+
+### 13.3 Why preview runs out so early
+
+Three checks at 50 m/s, fixed feedforward, C = 0:
+
+| Look-ahead | 0 m | 5 m | 10 m | 25 m | 50 m | 100 m |
+|---|---|---|---|---|---|---|
+| Baseline (from 13.2) | -22 % | | -47 % | -47 % | -47 % | -46 % |
+| Actuator rate cut to 30 deg/s | -17 % | | -36 % | -36 % | -36 % | -36 % |
+| Unsteady plant (Wagner, Kussner lags) | -47 % | -54 % | -54 % | -54 % | -54 % | -54 % |
+| No actuator limits at all | -99 % | -100 % | -99 % | -99 % | -99 % | -100 % |
+
+The first guess, that a fast actuator needs little warning, was wrong: a five
+times slower actuator still levels off at 10 m. The last row gives the actual
+reason. With unlimited deflection, a perfect gust measurement taken *at* the
+wing cancels 99 % of the load, because flap and gust act on the same strips
+through the same dynamics. The binding constraint is deflection authority (the
+surface sits on its 20 degree stop about 20 % of the time), and warning time
+cannot create authority. Preview only needs to cover the actuator and
+aerodynamic lags, about 0.1 s, which the unsteady plant confirms with the
+benefit complete by 5 m.
+
+This is partly a property of the model. The wing is clamped, so there is no
+rigid-body pitch or plunge, and the published lidar benefits come largely
+from whole-aircraft response, slower spoiler-type effectors and rate-limited
+manoeuvre loads. A free-flying model would be needed to see them.
