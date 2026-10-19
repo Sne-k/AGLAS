@@ -33,6 +33,40 @@ rb = closed_loop_sim(cfg, P, cb, tg, wg);
 state = aglas_assert(state, 'explicit probe signal reproduces the built-in probe', ...
     max(abs(ra.moment - rb.moment)) < 1e-9*max(abs(ra.moment)), '');
 
+% Probe model: with no decay it is the frozen-turbulence advance; with decay
+% the correlation with the advanced gust falls as the sensor moves further
+% ahead, and the measured signal keeps the spectrum's variance.
+[w1, t1] = gust_von_karman(cfg, 60, 0.005);
+c3 = cfg; c3.turb.seed = cfg.turb.seed + 2;
+w2 = gust_von_karman(c3, 60, 0.005);
+t1 = t1(:); w1 = w1(:);
+r0 = probe_signal(cfg, t1, w1, 50);
+adv = interp1(t1, w1, t1 + 50/cfg.flight.U_inf, 'linear', w1(end));
+state = aglas_assert(state, 'probe with no decay is the frozen-turbulence advance', ...
+    isequal(r0, adv), '');
+rho = zeros(1, 3);  ds = [10 50 200];
+for i = 1:3
+    ri = probe_signal(cfg, t1, w1, ds(i), w2, 4);
+    ai = interp1(t1, w1, t1 + ds(i)/cfg.flight.U_inf, 'linear', w1(end));
+    cm = corrcoef(ri, ai);  rho(i) = cm(1,2);
+end
+state = aglas_assert(state, 'probe coherence falls with look-ahead distance', ...
+    all(diff(rho) < 0) && rho(1) < 1, sprintf('correlation %.3f, %.3f, %.3f at 10, 50, 200 m', rho));
+
+% Variance is preserved in expectation only: the turbulence generator fixes
+% the spectral amplitudes and randomises the phases, so one realisation
+% carries a random cross-term dominated by a few low-frequency bins.
+% Average over independent fields.
+vr = zeros(1, 20);
+for s = 1:20
+    cs = cfg; cs.turb.seed = cfg.turb.seed + 100 + s;
+    wi = gust_von_karman(cs, 60, 0.005);
+    ri = probe_signal(cfg, t1, w1, 200, wi, 4);
+    vr(s) = var(ri) / var(interp1(t1, w1, t1 + 200/cfg.flight.U_inf, 'linear', w1(end)));
+end
+state = aglas_assert(state, 'probe signal keeps the turbulence variance on average', ...
+    abs(mean(vr) - 1) < 0.1, sprintf('mean variance ratio %.3f over 20 fields', mean(vr)));
+
 % A command delay must reach the plant exactly nd steps late.
 cd_ = cfg; cd_.control.delay = 0.010;
 rd  = closed_loop_sim(cd_, P, base, tg, wg);

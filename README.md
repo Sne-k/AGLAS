@@ -159,7 +159,7 @@ src/supplementary_pipeline/
                       c1m..c6m  gust models, mesh convergence, response
                                 comparison, stress field, strain, sizing
 simulink/                       closed-loop model, built by script
-tests/                          verification suite, 104 checks
+tests/                          verification suite, 107 checks
 docs/control-design-log.md      full control design record, including dead ends
 data/                           generated .mat results
 results/                        generated figures
@@ -174,12 +174,12 @@ addpath('tests'); run_all_tests
 The same suite runs on GitHub Actions for every push to `main` and every pull
 request (`.github/workflows/tests.yml`).
 
-104 checks. The 76 physics checks are all against closed-form references rather
+107 checks. The 76 physics checks are all against closed-form references rather
 than previously recorded output; 7 check the unsteady control plant against
 Theodorsen's `C(k)` and the p-k flutter boundary; the 14 control checks cover the Riccati,
 Lyapunov and controllability routines against closed forms, and pin the
 closed-loop results in the table above so a change to the controller cannot
-silently move them; 7 cover the gust feedforward path. A suite that only compared against stored numbers would have locked in
+silently move them; 10 cover the gust feedforward path and probe model. A suite that only compared against stored numbers would have locked in
 the defects this code was written to remove.
 
 | Check | Reference | Agreement |
@@ -215,6 +215,10 @@ when a result falls outside the range where its assumptions hold.
 - **Linear beam theory.** Deflections assumed small. The code warns above 10 %
   of span; the baseline reaches 6.7 %.
 - **Prismatic, unswept, untapered.** No sweep, taper or spanwise variation.
+- **Clamped wing, no rigid-body motion.** The aircraft cannot pitch or plunge,
+  which is where much of the published benefit of long-range lidar preview
+  comes from. The preview sweep above is a statement about this wing, not
+  about lidar in general.
 - **The default control plant is quasi-steady.** It omits the `C(k)` phase lag
   and loses stability at about 216 m/s, well below the 314.8 m/s flutter speed.
   Use it for design well below that boundary. The unsteady plant reproduces the
@@ -301,6 +305,27 @@ by simulation over the cases tried, not proved.
 
 `docs/control-design-log.md` has the full evidence, every measurement and every
 dead end.
+
+## On gust preview
+
+Doppler lidar can measure the gust 30 to 200 m ahead, and published load
+alleviation designs are built around that warning time. A sweep of the
+look-ahead distance (`probe_signal`, design log section 13) finds that on this
+wing about 0.1 s of warning is all that helps:
+
+| Look-ahead, 80 m/s | 0 m | 10 m | 25 m | 50 m | 100 m | 200 m |
+|---|---|---|---|---|---|---|
+| Fixed feedforward, frozen turbulence | -12 % | -55 % | -56 % | -55 % | -54 % | -54 % |
+| Adaptive feedforward, frozen turbulence | -73 % | **-85 %** | -80 % | -74 % | -77 % | -70 % |
+| Fixed feedforward, evolving turbulence (C = 1) | -12 % | -52 % | -46 % | -40 % | -35 % | -29 % |
+
+Turbulence RMS against LQG. Beyond about 10 m extra preview adds nothing even
+with a perfect measurement, and once the gust evolves between sensor and wing
+every extra metre costs performance. The reason is deflection authority, not
+timing: with the actuator limits removed, a perfect measurement taken at the
+wing itself cancels 99 % of the load, and a five times slower actuator still
+levels off at 10 m. Preview only has to cover the actuator and aerodynamic
+lags, and warning time cannot create authority the surface does not have.
 
 ## References
 
